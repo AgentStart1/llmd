@@ -1,0 +1,14 @@
+<resources>
+    <string name="app_name">"llmd"</string>
+    <string name="main_activity_title">"llmd"</string>
+    <string name="ipc_authorization_title">"llmd IPC authorization"</string>
+    <string name="ipc_authorization_eyebrow">"IPC ACCESS REQUEST"</string>
+    <string name="ipc_authorization_heading">"Allow this app to use llmd?"</string>
+    <string name="ipc_authorization_body">"The requesting app will be able to call the local llmd service on this device. Only approve apps you trust."</string>
+    <string name="ipc_authorization_app_label">"App"</string>
+    <string name="ipc_authorization_package_label">"Package"</string>
+    <string name="ipc_authorization_signature_label">"Signing certificate"</string>
+    <string name="ipc_authorization_signature_unavailable">"Unavailable"</string>
+    <string name="ipc_authorization_allow">"Allow"</string>
+    <string name="ipc_authorization_cancel">"Cancel"</string>
+</resources>

@@ -1,0 +1,31 @@
+[package]
+name = "llmd-app"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/storytellerF/llmd"
+rust-version = "1.78"
+
+[lib]
+name = "llmd_app"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+async-trait = "0.1"
+futures-util = "0.3"
+llmd-core = { path = "../../crates/llmd-core" }
+llmd-rlitert = { path = "../../crates/llmd-rlitert" }
+llmd-server = { path = "../../crates/llmd-server" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tauri = { version = "2", features = [] }
+tokio = { version = "1.42", features = ["full"] }
+
+[target.'cfg(target_os = "android")'.dependencies]
+jni = "0.21"
+
+[features]
+custom-protocol = ["tauri/custom-protocol"]

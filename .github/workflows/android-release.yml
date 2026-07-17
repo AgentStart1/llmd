@@ -1,0 +1,119 @@
+name: Android Release
+
+permissions:
+  contents: write
+
+on:
+  push:
+    branches: ["main"]
+    tags:
+      - "*"
+
+env:
+  ANDROID_TARGET: "aarch64"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux build dependencies
+        run: sudo apt-get update && sudo apt-get install -y libdbus-1-dev pkg-config
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: "21"
+          distribution: temurin
+          cache: gradle
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+            app/src-tauri
+
+      - name: Configure preinstalled Android SDK
+        run: |
+          test -d "${ANDROID_HOME}"
+          test -d "${ANDROID_SDK_ROOT}"
+          test -d "${ANDROID_NDK_HOME}"
+          echo "NDK_HOME=${ANDROID_NDK_HOME}" >> "$GITHUB_ENV"
+
+      - name: Install frontend dependencies
+        working-directory: app
+        run: npm ci
+
+      - name: Decode signing key
+        run: |
+          echo "${{ secrets.SIGNING_KEY }}" | base64 -d > "$HOME/signing_key.jks"
+
+      - name: Build Android APK
+        working-directory: app
+        run: |
+          ../scripts/sync-tauri-android-overrides.sh
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            npx tauri android build --apk --target "${ANDROID_TARGET}" --ci
+          else
+            npx tauri android build --apk --target "${ANDROID_TARGET}" --ci
+            ../scripts/sync-tauri-android-overrides.sh
+            ./src-tauri/gen/android/gradlew \
+              --project-dir ./src-tauri/gen/android \
+              :app:assembleArm64Daily
+          fi
+        env:
+          storyteller_f_sign_key: ${{ secrets.SIGNING_KEY }}
+          storyteller_f_sign_alias: ${{ secrets.ALIAS }}
+          storyteller_f_sign_store_password: ${{ secrets.STORE_PASSWORD }}
+          storyteller_f_sign_key_password: ${{ secrets.KEY_PASSWORD }}
+
+      - name: Upload daily Android APK
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: llmd-android-daily-apk
+          path: app/src-tauri/gen/android/app/build/outputs/apk/arm64/daily/*.apk
+          if-no-files-found: error
+
+      - name: Upload release Android APK
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: actions/upload-artifact@v4
+        with:
+          name: llmd-android-release-apk
+          path: app/src-tauri/gen/android/app/build/outputs/apk/**/release/*.apk
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download Android APK
+        uses: actions/download-artifact@v4
+        with:
+          name: llmd-android-release-apk
+          path: dist
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Release ${{ github.ref_name }}
+          files: dist/**/*.apk

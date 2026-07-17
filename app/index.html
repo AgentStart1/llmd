@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>llmd</title>
+  </head>
+  <body>
+    <main>
+      <section class="toolbar">
+        <h1>llmd</h1>
+        <p>Local OpenAI-compatible LiteRT-LM host</p>
+        <div class="actions">
+          <button id="health" type="button">Check health</button>
+          <button id="refresh-models" type="button">Refresh models</button>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Service</h2>
+        <dl>
+          <div>
+            <dt>API</dt>
+            <dd><span id="api-base"></span></dd>
+          </div>
+          <div>
+            <dt>Default model</dt>
+            <dd>gemma-4-E2B-it</dd>
+          </div>
+          <div>
+            <dt>Android model path</dt>
+            <dd><span id="model-path"></span></dd>
+          </div>
+        </dl>
+      </section>
+
+      <section class="panel">
+        <div class="panel-heading">
+          <h2>Models</h2>
+          <button id="import-model" type="button">Import model</button>
+        </div>
+        <p id="model-status"></p>
+        <ul id="model-list"></ul>
+      </section>
+
+      <section class="panel">
+        <h2>Logs</h2>
+        <a id="logs" target="_blank" rel="noreferrer">Open logs endpoint</a>
+        <pre id="output"></pre>
+      </section>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
