@@ -16,7 +16,7 @@
         </provider>
 
         <service
-            android:name=".LlmdForegroundService"
+            android:name="com.storytellerf.llmd.LlmdForegroundService"
             android:exported="false"
             android:foregroundServiceType="specialUse">
             <property
@@ -25,7 +25,7 @@
         </service>
 
         <service
-            android:name=".LlmdIpcService"
+            android:name="com.storytellerf.llmd.LlmdIpcService"
             android:exported="true">
             <intent-filter>
                 <action android:name="com.storytellerf.llmd.action.BIND_IPC" />
@@ -33,7 +33,7 @@
         </service>
 
         <activity
-            android:name=".LlmdIpcAuthorizationActivity"
+            android:name="com.storytellerf.llmd.LlmdIpcAuthorizationActivity"
             android:exported="true"
             android:label="@string/ipc_authorization_title">
             <intent-filter>
