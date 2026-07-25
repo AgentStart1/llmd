@@ -1,3 +1,6 @@
+        getByName("release") {
+            signingConfigs.findByName("release")?.let { signingConfig = it }
+        }
         create("daily") {
             initWith(getByName("release"))
             applicationIdSuffix = ".daily"

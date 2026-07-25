@@ -73,6 +73,11 @@ if ! grep -Fq 'implementation(project(":llmd-android"))' "${BUILD_FILE}"; then
   apply_template "${BUILD_FILE}" "__LLMD_ANDROID_DEPENDENCY__" "${PATCHES_DIR}/app-dependency.gradle.kts"
 fi
 
+if ! grep -Fq 'storyteller_f_sign_key' "${BUILD_FILE}"; then
+  perl -0pi -e 's#(\n    buildTypes \{)#\n__LLMD_ANDROID_SIGNING__$1#' "${BUILD_FILE}"
+  apply_template "${BUILD_FILE}" "__LLMD_ANDROID_SIGNING__" "${PATCHES_DIR}/signing.gradle.kts"
+fi
+
 if ! grep -Fq 'create("daily")' "${BUILD_FILE}" && ! grep -Fq 'create("e2e")' "${BUILD_FILE}"; then
   perl -0pi -e 's#(\n    \}\n    kotlinOptions \{)#\n__LLMD_ANDROID_BUILD_TYPES__$1#' "${BUILD_FILE}"
   apply_template "${BUILD_FILE}" "__LLMD_ANDROID_BUILD_TYPES__" "${PATCHES_DIR}/build-types.gradle.kts"
