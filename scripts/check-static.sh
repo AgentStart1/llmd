@@ -88,14 +88,6 @@ run_host_checks() {
   (cd "${ROOT_DIR}" && npm --prefix app run build)
 }
 
-run_android_kotlin_checks() {
-  step "Syncing Tauri Android overrides"
-  "${ROOT_DIR}/scripts/sync-tauri-android-overrides.sh"
-
-  step "Compiling Android Kotlin and AIDL"
-  (cd "${ROOT_DIR}/app/src-tauri/gen/android" && ./gradlew :app:compileArm64DebugKotlin --no-daemon)
-}
-
 android_ndk_home() {
   if [[ -n "${ANDROID_NDK_HOME:-}" ]]; then
     echo "${ANDROID_NDK_HOME}"
@@ -114,7 +106,7 @@ android_ndk_home() {
   fi
 }
 
-run_android_rust_checks() {
+configure_android_rust_toolchain() {
   local ndk_home toolchain
   ndk_home="$(android_ndk_home)"
   if [[ -z "${ndk_home}" ]]; then
@@ -132,6 +124,18 @@ run_android_rust_checks() {
   export CC_aarch64_linux_android="${CC_aarch64_linux_android:-${toolchain}/aarch64-linux-android${ANDROID_API_LEVEL}-clang}"
   export CXX_aarch64_linux_android="${CXX_aarch64_linux_android:-${toolchain}/aarch64-linux-android${ANDROID_API_LEVEL}-clang++}"
   export AR_aarch64_linux_android="${AR_aarch64_linux_android:-${toolchain}/llvm-ar}"
+}
+
+run_android_kotlin_checks() {
+  step "Syncing Tauri Android overrides"
+  "${ROOT_DIR}/scripts/sync-tauri-android-overrides.sh"
+
+  step "Compiling Android Kotlin and AIDL"
+  (cd "${ROOT_DIR}/app/src-tauri/gen/android" && ./gradlew :app:compileArm64DebugKotlin --no-daemon)
+}
+
+run_android_rust_checks() {
+  configure_android_rust_toolchain
 
   step "Checking Tauri Rust crate for ${ANDROID_TARGET}"
   (cd "${ROOT_DIR}" && cargo check --manifest-path app/src-tauri/Cargo.toml --locked --target "${ANDROID_TARGET}")

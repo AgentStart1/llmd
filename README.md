@@ -84,7 +84,7 @@ Prepare the default Gemma 4 E2B model:
 scripts/download-gemma-model.sh
 ```
 
-Push the model to a connected Android device:
+Push the model to a connected Android device for a debuggable APK:
 
 ```bash
 ANDROID_UDID=<device-serial> scripts/prepare-android-model.sh
@@ -93,7 +93,22 @@ ANDROID_UDID=<device-serial> scripts/prepare-android-model.sh
 The default model path is `models/gemma/gemma-4-E2B-it.litertlm`. Model files are ignored by git.
 The Android preparation script copies that file into the app-private `files/models` directory, so install a debuggable APK before running it.
 
-After the Tauri Android app is installed and its device-local API server is running, test the API through `adb reverse`:
+Run the Android end-to-end test through Appium. By default this builds and installs the normal
+`debug` APK, pushes the model to device Downloads, imports it through the Android document picker,
+then verifies the device-local OpenAI-compatible API:
+
+```bash
+ANDROID_UDID=<device-serial> scripts/test-android-appium.sh
+```
+
+When investigating obfuscation issues, use the `e2e` buildType. It keeps release minification
+enabled while remaining debug-signed for local installation:
+
+```bash
+ANDROID_UDID=<device-serial> scripts/test-android-appium.sh --e2e
+```
+
+After the Tauri Android app is installed and its device-local API server is running, test the API through `adb forward`:
 
 ```bash
 ANDROID_UDID=<device-serial> scripts/test-android-openai-api.sh

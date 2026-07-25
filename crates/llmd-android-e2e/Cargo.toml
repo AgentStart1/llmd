@@ -1,0 +1,14 @@
+[package]
+name = "llmd-android-e2e"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+appium-client = { version = "0.2.2", default-features = false, features = ["rustls-tls"] }
+openssl = { version = "0.10", features = ["vendored"] }
+serde_json.workspace = true
+tokio.workspace = true

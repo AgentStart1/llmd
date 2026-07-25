@@ -2,6 +2,8 @@
 /app/node_modules/
 /app/dist/
 /app/src-tauri/target/
+/app/src-tauri/android/*/build/
+/app/src-tauri/gen/android/
 *.log
 /models/**/*.litertlm
 /build/

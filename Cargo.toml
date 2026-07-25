@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "cli",
+    "crates/llmd-android-e2e",
     "crates/llmd-core",
     "crates/llmd-rlitert",
     "crates/llmd-server",
