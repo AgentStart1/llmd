@@ -207,13 +207,10 @@ fn build_e2e_apk(config: &Config) -> Result<()> {
     )?;
 
     let gradle_task = format!(":app:assemble{}", config.android_variant);
-    let rust_task = format!(":app:rustBuild{}", config.android_variant);
     run_status(
         Command::new("./gradlew")
             .current_dir(config.root_dir.join("app/src-tauri/gen/android"))
             .arg(gradle_task)
-            .arg("-x")
-            .arg(rust_task)
             .arg(format!(
                 "-PtargetList={}",
                 tauri_target(&config.android_target)

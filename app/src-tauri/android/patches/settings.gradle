@@ -1,0 +1,2 @@
+include ':llmd-android'
+project(':llmd-android').projectDir = new File(rootDir, '../../android/llmd-android')
