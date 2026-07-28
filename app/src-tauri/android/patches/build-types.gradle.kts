@@ -9,7 +9,6 @@
         }
         create("e2e") {
             initWith(getByName("release"))
-            manifestPlaceholders["usesCleartextTraffic"] = "true"
             isDebuggable = false
             isJniDebuggable = false
             signingConfig = signingConfigs.getByName("debug")

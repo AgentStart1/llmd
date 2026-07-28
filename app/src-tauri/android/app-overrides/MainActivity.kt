@@ -1,8 +1,6 @@
 package com.storytellerf.llmd
 
-import android.content.Intent
 import android.net.Uri
-import android.os.Build
 import android.os.Bundle
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
@@ -39,13 +37,6 @@ class MainActivity : TauriActivity() {
     enableEdgeToEdge()
     LlmdAndroidBridge.configure(this)
     super.onCreate(savedInstanceState)
-    val intent = Intent(this, LlmdForegroundService::class.java)
-      .setAction(LlmdForegroundService.ACTION_START)
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-      startForegroundService(intent)
-    } else {
-      startService(intent)
-    }
   }
 
   override fun onWebViewCreate(webView: WebView) {
@@ -102,5 +93,8 @@ class MainActivity : TauriActivity() {
 
     @JavascriptInterface
     fun getModelState(): String = LlmdAndroidBridge.modelStateJson()
+
+    @JavascriptInterface
+    fun getHealthState(): String = LlmdAndroidBridge.healthJson()
   }
 }

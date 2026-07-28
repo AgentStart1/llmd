@@ -69,12 +69,10 @@ For OpenAI-compatible HTTP API changes, test against a running endpoint:
 LLMD_OPENAI_BASE_URL=http://127.0.0.1:11435 scripts/test-openai-api.sh
 ```
 
-For Android model and device-local API validation, install a debuggable APK first, then prepare the
-model and run the Android API test:
+For Android model-import validation, run the Appium flow against a connected device:
 
 ```bash
-ANDROID_UDID=<device-serial> scripts/prepare-android-model.sh
-ANDROID_UDID=<device-serial> scripts/test-android-openai-api.sh
+ANDROID_UDID=<device-serial> scripts/test-android-appium.sh
 ```
 
 For Android IPC authorization changes, manually verify on device or emulator:
@@ -84,3 +82,6 @@ For Android IPC authorization changes, manually verify on device or emulator:
 - approving the caller persists authorization through DataStore,
 - the same caller can call health, model list, and chat IPC methods after approval,
 - no `SharedPreferences` or `runBlocking` usage is introduced in the IPC authorization path.
+
+Android does not expose a device-local OpenAI HTTP server. Its UI uses the in-app native bridge,
+and other Android apps use the authorized Binder IPC service.

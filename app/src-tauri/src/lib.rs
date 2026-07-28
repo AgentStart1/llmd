@@ -1,6 +1,4 @@
-#[cfg(target_os = "android")]
-mod android_litert;
-
+#[cfg(not(target_os = "android"))]
 use llmd_core::{DEFAULT_HOST, DEFAULT_PORT};
 
 #[cfg_attr(target_os = "android", allow(dead_code))]
@@ -19,7 +17,8 @@ fn health_payload() -> serde_json::Value {
         "status": "ok",
         "desktop_provider": desktop_provider_name(),
         "android_provider": android_provider_name(),
-        "api_base_url": format!("http://{}:{}", DEFAULT_HOST, DEFAULT_PORT)
+        "transport": platform_transport(),
+        "api_base_url": platform_api_base_url(),
     })
 }
 
@@ -37,12 +36,32 @@ fn desktop_provider_name() -> &'static str {
 fn android_provider_name() -> &'static str {
     #[cfg(target_os = "android")]
     {
-        android_litert::PROVIDER_NAME
+        ANDROID_PROVIDER_NAME
     }
     #[cfg(not(target_os = "android"))]
     {
         DISABLED_PROVIDER_NAME
     }
+}
+
+#[cfg(not(target_os = "android"))]
+fn platform_transport() -> &'static str {
+    "http"
+}
+
+#[cfg(target_os = "android")]
+fn platform_transport() -> &'static str {
+    "binder_ipc"
+}
+
+#[cfg(not(target_os = "android"))]
+fn platform_api_base_url() -> Option<String> {
+    Some(format!("http://{}:{}", DEFAULT_HOST, DEFAULT_PORT))
+}
+
+#[cfg(target_os = "android")]
+fn platform_api_base_url() -> Option<String> {
+    None
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -76,7 +95,7 @@ fn start_platform_api_server() {
 
 #[cfg(target_os = "android")]
 fn start_platform_api_server() {
-    // Android starts the API server from MainActivity so it can use litertlm-android.
+    // Android exposes LiteRT-LM only through the authorized Binder IPC service.
 }
 
 #[cfg(test)]
@@ -93,6 +112,7 @@ mod tests {
         assert_eq!(payload["status"], "ok");
         assert_eq!(payload["desktop_provider"], DESKTOP_PROVIDER_NAME);
         assert_eq!(payload["android_provider"], DISABLED_PROVIDER_NAME);
+        assert_eq!(payload["transport"], "http");
         assert_eq!(payload["api_base_url"], "http://127.0.0.1:11435");
     }
 

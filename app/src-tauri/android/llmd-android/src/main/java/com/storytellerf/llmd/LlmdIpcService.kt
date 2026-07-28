@@ -35,7 +35,10 @@ class LlmdIpcService : Service() {
     override fun onBind(intent: Intent?): IBinder = binder
 
     override fun onDestroy() {
-        serviceScope.cancel()
+        serviceScope.launch {
+            LlmdAndroidBridge.close()
+            serviceScope.cancel()
+        }
         super.onDestroy()
     }
 

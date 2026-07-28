@@ -9,15 +9,12 @@ type AndroidModelState = {
   error?: string | null;
 };
 
-type ModelsResponse = {
-  data?: Array<{ id?: string }>;
-};
-
 declare global {
   interface Window {
     llmdAndroid?: {
       importDefaultModel(): void;
       getModelState(): string;
+      getHealthState(): string;
     };
   }
 }
@@ -31,11 +28,23 @@ const modelPath = document.querySelector<HTMLSpanElement>("#model-path");
 const modelStatus = document.querySelector<HTMLParagraphElement>("#model-status");
 const modelList = document.querySelector<HTMLUListElement>("#model-list");
 const logs = document.querySelector<HTMLAnchorElement>("#logs");
+const logsHeading = document.querySelector<HTMLElement>("#logs-heading");
 
 const defaultApiBase = "http://127.0.0.1:11435";
 const defaultModel = "gemma-4-E2B-it";
 
 health?.addEventListener("click", async () => {
+  if (window.llmdAndroid) {
+    if (output) {
+      output.textContent = JSON.stringify(
+        parseAndroidState(window.llmdAndroid.getHealthState()),
+        null,
+        2,
+      );
+    }
+    return;
+  }
+
   try {
     const response = await invoke<Record<string, unknown>>("health");
     if (output) output.textContent = JSON.stringify(response, null, 2);
@@ -60,14 +69,19 @@ importModel?.addEventListener("click", () => {
 window.addEventListener("llmd-models-changed", (event) => {
   const state = (event as CustomEvent<AndroidModelState>).detail;
   renderAndroidModelState(state);
-  void refreshModelList();
 });
 
-if (apiBase) apiBase.textContent = defaultApiBase;
-if (logs) logs.href = `${defaultApiBase}/logs`;
+if (window.llmdAndroid) {
+  if (apiBase) apiBase.textContent = "Android Binder IPC";
+  if (logsHeading) logsHeading.hidden = true;
+  if (logs) logs.hidden = true;
+} else {
+  if (apiBase) apiBase.textContent = defaultApiBase;
+  if (logs) logs.href = `${defaultApiBase}/logs`;
+}
 
 loadAndroidModelState();
-void refreshModelList();
+if (!window.llmdAndroid) void refreshModelList();
 
 function loadAndroidModelState() {
   if (window.llmdAndroid) {
@@ -80,11 +94,16 @@ function loadAndroidModelState() {
 }
 
 async function refreshModelList() {
+  if (window.llmdAndroid) {
+    loadAndroidModelState();
+    return;
+  }
+
   try {
     const response = await fetch(`${defaultApiBase}/v1/models`);
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
-    const body = (await response.json()) as ModelsResponse;
+    const body = (await response.json()) as { data?: Array<{ id?: string }> };
     const models = body.data?.flatMap((model) => (model.id ? [model.id] : [])) ?? [];
     renderModels(models);
     setModelStatus(
@@ -141,5 +160,9 @@ function setModelStatus(message: string) {
 }
 
 function parseAndroidModelState(json: string): AndroidModelState {
-  return JSON.parse(json) as AndroidModelState;
+  return parseAndroidState(json) as AndroidModelState;
+}
+
+function parseAndroidState(json: string): Record<string, unknown> {
+  return JSON.parse(json) as Record<string, unknown>;
 }

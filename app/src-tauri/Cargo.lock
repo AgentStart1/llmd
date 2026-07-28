@@ -2073,9 +2073,6 @@ dependencies = [
 name = "llmd-app"
 version = "0.1.0"
 dependencies = [
- "async-trait",
- "futures-util",
- "jni",
  "llmd-core",
  "llmd-rlitert",
  "llmd-server",

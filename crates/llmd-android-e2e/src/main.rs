@@ -17,7 +17,6 @@ use appium_client::{
 
 const DEFAULT_PACKAGE: &str = "com.storytellerf.llmd";
 const DEFAULT_MODEL: &str = "gemma-4-E2B-it";
-const DEFAULT_PORT: &str = "11435";
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -36,9 +35,6 @@ async fn main() -> Result<()> {
     }
     appium_result?;
 
-    forward_api_port(&config)?;
-    run_openai_api_test(&config)?;
-
     Ok(())
 }
 
@@ -52,8 +48,6 @@ struct Config {
     model_path: PathBuf,
     device_model_path: String,
     appium_url: String,
-    local_port: String,
-    remote_port: String,
 }
 
 impl Config {
@@ -98,10 +92,6 @@ impl Config {
                 .unwrap_or_else(|_| format!("/sdcard/Download/{model_file_name}")),
             appium_url: env::var("APPIUM_URL")
                 .unwrap_or_else(|_| "http://127.0.0.1:4723/".to_string()),
-            local_port: env::var("LLMD_ANDROID_LOCAL_PORT")
-                .unwrap_or_else(|_| DEFAULT_PORT.to_string()),
-            remote_port: env::var("LLMD_ANDROID_REMOTE_PORT")
-                .unwrap_or_else(|_| DEFAULT_PORT.to_string()),
             model_path,
         })
     }
@@ -406,28 +396,6 @@ async fn wait_for_any(
         tokio::time::sleep(Duration::from_secs(1)).await;
     }
     bail!("timed out waiting for model import completion")
-}
-
-fn forward_api_port(config: &Config) -> Result<()> {
-    let _ = command("adb", config)
-        .args(["forward", "--remove", &format!("tcp:{}", config.local_port)])
-        .status();
-    run_status(command("adb", config).args([
-        "forward",
-        &format!("tcp:{}", config.local_port),
-        &format!("tcp:{}", config.remote_port),
-    ]))
-}
-
-fn run_openai_api_test(config: &Config) -> Result<()> {
-    run_status(
-        Command::new(config.root_dir.join("scripts/test-openai-api.sh"))
-            .current_dir(&config.root_dir)
-            .env(
-                "LLMD_OPENAI_BASE_URL",
-                format!("http://127.0.0.1:{}", config.local_port),
-            ),
-    )
 }
 
 fn ensure_appium(config: &Config) -> Result<Option<Child>> {

@@ -2,17 +2,12 @@ package com.storytellerf.llmd
 
 import android.content.Context
 import java.io.File
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import org.json.JSONArray
 import org.json.JSONObject
 
 object LlmdAndroidBridge {
-    private val bridgeScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val providerMutex = Mutex()
     private var appContext: Context? = null
     private var provider: AndroidLiteRtProvider? = null
@@ -53,22 +48,17 @@ object LlmdAndroidBridge {
             .toString()
     }
 
+    fun healthJson(): String = JSONObject()
+        .put("status", "ok")
+        .put("provider", "litert-lm-android")
+        .put("transport", "binder_ipc")
+        .toString()
+
     private fun listModelsSync(): List<String> =
         when {
             File(selectedModelPath).isUsableModelFile() -> listOf(DEFAULT_MODEL)
             else -> emptyList()
         }
-
-    fun chatCompletionAsync(requestId: Long, requestJson: String) {
-        bridgeScope.launch {
-            val result = runCatching { chatCompletion(requestJson) }
-            LlmdNativeServer.completeChatCompletion(
-                requestId,
-                result.getOrNull(),
-                result.exceptionOrNull()?.message,
-            )
-        }
-    }
 
     suspend fun chatCompletion(requestJson: String): String = providerMutex.withLock {
         val request = JSONObject(requestJson)

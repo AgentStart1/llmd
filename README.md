@@ -95,7 +95,7 @@ The Android preparation script copies that file into the app-private `files/mode
 
 Run the Android end-to-end test through Appium. By default this builds and installs the normal
 `debug` APK, pushes the model to device Downloads, imports it through the Android document picker,
-then verifies the device-local OpenAI-compatible API:
+then verifies that the native Android bridge reports the imported model:
 
 ```bash
 ANDROID_UDID=<device-serial> scripts/test-android-appium.sh
@@ -108,13 +108,8 @@ enabled while remaining debug-signed for local installation:
 ANDROID_UDID=<device-serial> scripts/test-android-appium.sh --e2e
 ```
 
-After the Tauri Android app is installed and its device-local API server is running, test the API through `adb forward`:
-
-```bash
-ANDROID_UDID=<device-serial> scripts/test-android-openai-api.sh
-```
-
-See `docs/android-tauri-openai-api.md`.
+Android exposes LiteRT-LM to other Android apps only through its authorized Binder IPC interface;
+it does not listen on a device TCP port. See `docs/android-tauri-ipc-api.md`.
 
 ## Tests
 
