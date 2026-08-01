@@ -292,14 +292,10 @@ async fn import_model_with_appium(config: &Config) -> Result<()> {
         .with_context(|| format!("connect Appium server at {}", config.appium_url))?;
 
     let result = async {
+        wait_click(&client, text("Models"), Duration::from_secs(180)).await?;
         wait_click(&client, text("Import model"), Duration::from_secs(180)).await?;
         select_model_in_picker(&client, config).await?;
-        wait_for_any(
-            &client,
-            &[text("Model imported."), text("Model is ready.")],
-            Duration::from_secs(900),
-        )
-        .await
+        wait_for_any(&client, &[text(DEFAULT_MODEL)], Duration::from_secs(900)).await
     }
     .await;
 

@@ -74,9 +74,16 @@ npm install
 npm run tauri dev
 ```
 
+The desktop app has Status, Models, and Logs pages. On Models, enter a LiteRT-LM
+model name to download it, select a model to inspect its details, and delete it
+from its detail page when it is no longer needed.
+
 ## Android
 
 Android uses the shared Tauri UI in `app`. The device app should expose the same OpenAI-compatible API as desktop and CLI, backed by native `litertlm-android`.
+
+Use the Models page to choose a local model file to import. Selecting an imported
+model opens its details page, where the file can be deleted from app-private storage.
 
 Prepare the default Gemma 4 E2B model:
 

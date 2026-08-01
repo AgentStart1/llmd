@@ -23,6 +23,28 @@ impl RlitertProvider {
             .map_err(|error| LlmdError::Backend(error.to_string()))?;
         Ok(Self { manager })
     }
+
+    pub async fn import_model(model: &str) -> Result<(), LlmdError> {
+        let manager = LitManager::new()
+            .await
+            .map_err(|error| LlmdError::Backend(error.to_string()))?;
+        manager
+            .pull_quiet(model, None, None)
+            .await
+            .map_err(|error| LlmdError::Backend(error.to_string()))?;
+        Ok(())
+    }
+
+    pub async fn delete_model(model: &str) -> Result<(), LlmdError> {
+        let manager = LitManager::new()
+            .await
+            .map_err(|error| LlmdError::Backend(error.to_string()))?;
+        manager
+            .remove_quiet(model)
+            .await
+            .map_err(|error| LlmdError::Backend(error.to_string()))?;
+        Ok(())
+    }
 }
 
 #[async_trait]

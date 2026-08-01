@@ -20,13 +20,13 @@ class MainActivity : TauriActivity() {
   private var webView: WebView? = null
   private val importModel = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
     if (uri == null) {
-      emitModelImport("cancelled")
+      emitModelMutation("cancelled")
       return@registerForActivityResult
     }
 
     activityScope.launch {
       val result = runCatching { copyDefaultModel(uri) }
-      emitModelImport(
+      emitModelMutation(
         status = if (result.isSuccess) "imported" else "error",
         error = result.exceptionOrNull()?.message,
       )
@@ -68,7 +68,7 @@ class MainActivity : TauriActivity() {
     destination
   }
 
-  private fun emitModelImport(status: String, error: String? = null) {
+  private fun emitModelMutation(status: String, error: String? = null) {
     val detail = JSONObject(LlmdAndroidBridge.modelStateJson())
       .put("status", status)
       .put("error", error)
@@ -87,6 +87,17 @@ class MainActivity : TauriActivity() {
             "application/vnd.litertlm",
             "*/*",
           ),
+        )
+      }
+    }
+
+    @JavascriptInterface
+    fun deleteModel(model: String) {
+      activityScope.launch {
+        val result = runCatching { LlmdAndroidBridge.deleteModel(model) }
+        emitModelMutation(
+          status = if (result.isSuccess) "deleted" else "error",
+          error = result.exceptionOrNull()?.message,
         )
       }
     }

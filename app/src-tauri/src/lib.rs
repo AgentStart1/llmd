@@ -12,6 +12,20 @@ fn health() -> serde_json::Value {
     health_payload()
 }
 
+#[tauri::command]
+async fn import_model(model: String) -> Result<(), String> {
+    llmd_rlitert::RlitertProvider::import_model(&model)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn delete_model(model: String) -> Result<(), String> {
+    llmd_rlitert::RlitertProvider::delete_model(&model)
+        .await
+        .map_err(|error| error.to_string())
+}
+
 fn health_payload() -> serde_json::Value {
     serde_json::json!({
         "status": "ok",
@@ -71,7 +85,7 @@ pub fn run() {
             start_platform_api_server();
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![health])
+        .invoke_handler(tauri::generate_handler![health, import_model, delete_model])
         .run(tauri::generate_context!())
         .expect("failed to run llmd app");
 }

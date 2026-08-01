@@ -6,49 +6,21 @@
     <title>llmd</title>
   </head>
   <body>
-    <main>
-      <section class="toolbar">
-        <h1>llmd</h1>
-        <p>Local OpenAI-compatible LiteRT-LM host</p>
-        <div class="actions">
-          <button id="health" type="button">Check health</button>
-          <button id="refresh-models" type="button">Refresh models</button>
-        </div>
-      </section>
-
-      <section class="panel" id="service-panel">
-        <h2>Service</h2>
-        <dl>
-          <div>
-            <dt>API</dt>
-            <dd><span id="api-base"></span></dd>
-          </div>
-          <div>
-            <dt>Default model</dt>
-            <dd>gemma-4-E2B-it</dd>
-          </div>
-          <div>
-            <dt>Android model path</dt>
-            <dd><span id="model-path"></span></dd>
-          </div>
-        </dl>
-      </section>
-
-      <section class="panel">
-        <div class="panel-heading">
-          <h2>Models</h2>
-          <button id="import-model" type="button">Import model</button>
-        </div>
-        <p id="model-status"></p>
-        <ul id="model-list"></ul>
-      </section>
-
-      <section class="panel" id="logs-panel">
-        <h2 id="logs-heading">Logs</h2>
-        <a id="logs" target="_blank" rel="noreferrer">Open logs endpoint</a>
-        <pre id="output"></pre>
-      </section>
-    </main>
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="Primary navigation">
+        <a class="brand" href="#/status" aria-label="llmd home">
+          <span class="brand-mark">L</span>
+          <span>llmd</span>
+        </a>
+        <nav class="nav-list">
+          <a href="#/status" data-nav="status">Status</a>
+          <a href="#/models" data-nav="models">Models</a>
+          <a href="#/logs" data-nav="logs">Logs</a>
+        </nav>
+        <p class="sidebar-note">Local LiteRT-LM</p>
+      </aside>
+      <main id="app" tabindex="-1"></main>
+    </div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

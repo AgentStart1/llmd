@@ -35,6 +35,16 @@ object LlmdAndroidBridge {
 
     suspend fun listModels(): List<String> = providerMutex.withLock { listModelsSync() }
 
+    suspend fun deleteModel(model: String) = providerMutex.withLock {
+        require(model == DEFAULT_MODEL) { "Unsupported model: $model" }
+        val modelFile = File(selectedModelPath)
+        require(modelFile.isUsableModelFile()) { "Model file does not exist: $selectedModelPath" }
+
+        provider?.close()
+        provider = null
+        require(modelFile.delete()) { "Unable to delete model file: $selectedModelPath" }
+    }
+
     fun listModelsJson(): String = JSONArray(listModelsSync()).toString()
 
     fun modelStateJson(): String {
