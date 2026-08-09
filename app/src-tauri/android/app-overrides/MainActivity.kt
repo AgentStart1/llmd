@@ -6,6 +6,7 @@ import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.enableEdgeToEdge
+import androidx.core.view.WindowInsetsControllerCompat
 import java.io.File
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -37,6 +38,15 @@ class MainActivity : TauriActivity() {
     enableEdgeToEdge()
     LlmdAndroidBridge.configure(this)
     super.onCreate(savedInstanceState)
+  }
+
+  override fun onStart() {
+    super.onStart()
+    // App status bar background is dark, so force light (light content) status bar icons.
+    WindowInsetsControllerCompat(window, window.decorView).apply {
+      isAppearanceLightStatusBars = false
+      isAppearanceLightNavigationBars = false
+    }
   }
 
   override fun onWebViewCreate(webView: WebView) {
