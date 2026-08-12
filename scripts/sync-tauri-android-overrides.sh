@@ -68,6 +68,20 @@ fi
 perl -0pi -e 's/minSdk = \d+/minSdk = 35/' "${BUILD_FILE}"
 perl -0pi -e 's#org\.jetbrains\.kotlin:kotlin-gradle-plugin:[^"]+#org.jetbrains.kotlin:kotlin-gradle-plugin:2.2.21#' "${ROOT_BUILD_FILE}"
 
+if ! grep -Fq 'gradlePluginPortal()' "${ROOT_BUILD_FILE}"; then
+  perl -0pi -e 's#(buildscript \{\n    repositories \{\n)#$1        gradlePluginPortal()\n#' "${ROOT_BUILD_FILE}"
+fi
+
+if ! grep -Fq 'com.starter.easylauncher.gradle.plugin:6.4.1' "${ROOT_BUILD_FILE}"; then
+  perl -0pi -e 's#(\n    dependencies \{\n)#$1__LLMD_EASYLAUNCHER_CLASSPATH__\n#' "${ROOT_BUILD_FILE}"
+  apply_template "${ROOT_BUILD_FILE}" "__LLMD_EASYLAUNCHER_CLASSPATH__" "${PATCHES_DIR}/easylauncher-classpath.gradle.kts"
+fi
+
+if ! grep -Fq 'apply(plugin = "com.starter.easylauncher")' "${BUILD_FILE}"; then
+  perl -0pi -e 's#(\n\}\n\n)(val tauriProperties)#$1__LLMD_EASYLAUNCHER_PLUGIN__\n$2#' "${BUILD_FILE}"
+  apply_template "${BUILD_FILE}" "__LLMD_EASYLAUNCHER_PLUGIN__" "${PATCHES_DIR}/easylauncher.gradle.kts"
+fi
+
 perl -0pi -e 's#\n\s*sourceSets\s*\{\s*getByName\("main"\)\s*\{\s*java\.srcDir\("../../../android/llmd-ipc/src/main/java"\)\s*aidl\.srcDir\("../../../android/llmd-ipc/src/main/aidl"\)\s*\}\s*\}\n#\n#s' "${BUILD_FILE}"
 perl -0pi -e 's#\n\s*implementation\("com\.google\.ai\.edge\.litertlm:litertlm-android:[^"]+"\)##' "${BUILD_FILE}"
 perl -0pi -e 's#\n\s*implementation\("androidx\.datastore:datastore-preferences:[^"]+"\)##' "${BUILD_FILE}"
