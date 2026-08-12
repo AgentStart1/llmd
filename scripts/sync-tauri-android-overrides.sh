@@ -61,6 +61,10 @@ if ! grep -Fq 'applicationId = "com.storytellerf.llmd"' "${BUILD_FILE}"; then
   perl -0pi -e 's/applicationId = "[^"]+"/applicationId = "com.storytellerf.llmd"/' "${BUILD_FILE}"
 fi
 
+if ! grep -Fq 'applicationIdSuffix = ".debug"' "${BUILD_FILE}"; then
+  perl -0pi -e 's#(\n    buildTypes \{\n)#$1        getByName("debug") {\n            applicationIdSuffix = ".debug"\n            versionNameSuffix = "-debug"\n        }\n#' "${BUILD_FILE}"
+fi
+
 perl -0pi -e 's/minSdk = \d+/minSdk = 35/' "${BUILD_FILE}"
 perl -0pi -e 's#org\.jetbrains\.kotlin:kotlin-gradle-plugin:[^"]+#org.jetbrains.kotlin:kotlin-gradle-plugin:2.2.21#' "${ROOT_BUILD_FILE}"
 

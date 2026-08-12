@@ -15,7 +15,9 @@ use appium_client::{
     ClientBuilder,
 };
 
-const DEFAULT_PACKAGE: &str = "com.storytellerf.llmd";
+const RELEASE_PACKAGE: &str = "com.storytellerf.llmd";
+const DEBUG_PACKAGE: &str = "com.storytellerf.llmd.debug";
+const MAIN_ACTIVITY: &str = "com.storytellerf.llmd.MainActivity";
 const DEFAULT_MODEL: &str = "gemma-4-E2B-it";
 
 #[tokio::main]
@@ -87,7 +89,7 @@ impl Config {
             android_build_type,
             android_variant,
             android_package: env::var("ANDROID_PACKAGE")
-                .unwrap_or_else(|_| DEFAULT_PACKAGE.to_string()),
+                .unwrap_or_else(|_| android_build_type.default_package().to_string()),
             device_model_path: env::var("LLMD_ANDROID_DEVICE_MODEL_PATH")
                 .unwrap_or_else(|_| format!("/sdcard/Download/{model_file_name}")),
             appium_url: env::var("APPIUM_URL")
@@ -128,6 +130,13 @@ impl AndroidBuildType {
             Self::E2e => "e2e",
         }
     }
+
+    fn default_package(self) -> &'static str {
+        match self {
+            Self::Debug => DEBUG_PACKAGE,
+            Self::E2e => RELEASE_PACKAGE,
+        }
+    }
 }
 
 fn build_and_install_apk(config: &Config) -> Result<()> {
@@ -140,10 +149,7 @@ fn build_and_install_apk(config: &Config) -> Result<()> {
         .current_dir(&config.root_dir),
     )?;
 
-    match config.android_build_type {
-        AndroidBuildType::Debug => build_debug_apk(config)?,
-        AndroidBuildType::E2e => build_e2e_apk(config)?,
-    }
+    build_apk(config)?;
 
     let apk = latest_apk(config)?;
     let _ = command("adb", config)
@@ -156,36 +162,17 @@ fn build_and_install_apk(config: &Config) -> Result<()> {
     )
 }
 
-fn build_debug_apk(config: &Config) -> Result<()> {
-    run_status(
-        Command::new("npx")
-            .current_dir(config.root_dir.join("app"))
-            .args([
-                "tauri",
-                "android",
-                "build",
-                "--apk",
-                "--debug",
-                "--target",
-                tauri_target(&config.android_target),
-                "--ci",
-            ]),
-    )
-}
+fn build_apk(config: &Config) -> Result<()> {
+    let mut args = vec!["tauri", "android", "build", "--apk"];
+    if matches!(config.android_build_type, AndroidBuildType::Debug) {
+        args.push("--debug");
+    }
+    args.extend(["--target", tauri_target(&config.android_target), "--ci"]);
 
-fn build_e2e_apk(config: &Config) -> Result<()> {
     run_status(
         Command::new("npx")
             .current_dir(config.root_dir.join("app"))
-            .args([
-                "tauri",
-                "android",
-                "build",
-                "--apk",
-                "--target",
-                tauri_target(&config.android_target),
-                "--ci",
-            ]),
+            .args(args),
     )?;
     run_status(
         Command::new(
@@ -197,6 +184,7 @@ fn build_e2e_apk(config: &Config) -> Result<()> {
     )?;
 
     let gradle_task = format!(":app:assemble{}", config.android_variant);
+    let rust_build_task = format!(":app:rustBuild{}", config.android_variant);
     run_status(
         Command::new("./gradlew")
             .current_dir(config.root_dir.join("app/src-tauri/gen/android"))
@@ -210,6 +198,11 @@ fn build_e2e_apk(config: &Config) -> Result<()> {
                 "-PabiList={}",
                 abi_for_target(&config.android_target)?
             ))
+            // Tauri has already built and staged this ABI's native library. Running
+            // this task again outside the Tauri process attempts to reconnect to its
+            // transient WebSocket server, which no longer exists.
+            .arg("-x")
+            .arg(rust_build_task)
             .arg("--no-daemon"),
     )
 }
@@ -281,7 +274,7 @@ async fn import_model_with_appium(config: &Config) -> Result<()> {
         capabilities.udid(serial);
     }
     capabilities.app_package(&config.android_package);
-    capabilities.app_activity(&format!("{}.MainActivity", config.android_package));
+    capabilities.app_activity(MAIN_ACTIVITY);
     capabilities.set_bool("appium:autoGrantPermissions", true);
     capabilities.set_bool("appium:noReset", true);
     capabilities.set_number("appium:newCommandTimeout", 180u64.into());
