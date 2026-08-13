@@ -98,10 +98,11 @@ ANDROID_UDID=<device-serial> scripts/prepare-android-model.sh
 ```
 
 The default model path is `models/gemma/gemma-4-E2B-it.litertlm`. Model files are ignored by git.
-The Android preparation script copies that file into the app-private `files/models` directory, so install a debuggable APK before running it.
+The Android preparation script copies that file into the app-private `files/models` directory. Its default target is the
+debug package, `com.storytellerf.llmd.debug`; set `ANDROID_PACKAGE` when preparing another debuggable variant.
 
 Run the Android end-to-end test through Appium. By default this builds and installs the normal
-`debug` APK, pushes the model to device Downloads, imports it through the Android document picker,
+`debug` APK as `com.storytellerf.llmd.debug`, pushes the model to device Downloads, imports it through the Android document picker,
 then verifies that the native Android bridge reports the imported model:
 
 ```bash
@@ -114,6 +115,9 @@ enabled while remaining debug-signed for local installation:
 ```bash
 ANDROID_UDID=<device-serial> scripts/test-android-appium.sh --e2e
 ```
+
+Launcher icons identify installed non-Release variants: Debug has a red `DEBUG` ribbon, Daily a
+purple `DAILY` ribbon, and E2E a blue `E2E` ribbon. Release uses the unmodified icon.
 
 Android exposes LiteRT-LM to other Android apps only through its authorized Binder IPC interface;
 it does not listen on a device TCP port. See `docs/android-tauri-ipc-api.md`.

@@ -4,6 +4,7 @@
 /app/src-tauri/target/
 /app/src-tauri/android/*/build/
 /app/src-tauri/gen/android/
+/app/src-tauri/gen/schemas/
 *.log
 /models/**/*.litertlm
 /build/
