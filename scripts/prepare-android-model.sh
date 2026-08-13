@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MODEL_PATH="${GEMMA_MODEL_PATH:-${ROOT_DIR}/models/gemma/gemma-4-E2B-it.litertlm}"
 REMOTE_MODEL_PATH="${REMOTE_GEMMA_MODEL_PATH:-/data/local/tmp/llmd/gemma-4-E2B-it.litertlm}"
-ANDROID_PACKAGE="${ANDROID_PACKAGE:-com.storytellerf.llmd}"
+ANDROID_PACKAGE="${ANDROID_PACKAGE:-com.storytellerf.llmd.debug}"
 APP_MODEL_PATH="${APP_GEMMA_MODEL_PATH:-files/models/gemma-4-E2B-it.litertlm}"
 DEVICE_SERIAL="${ANDROID_UDID:-${ANDROID_SERIAL:-}}"
 

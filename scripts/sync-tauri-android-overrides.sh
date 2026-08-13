@@ -36,6 +36,18 @@ apply_template() {
   sed -i "\\|${placeholder}|d" "${target}"
 }
 
+apply_patch_script() {
+  local target="$1"
+  local patch_script="$2"
+
+  if [[ ! -f "${patch_script}" ]]; then
+    echo "Missing Android patch script: ${patch_script}" >&2
+    exit 1
+  fi
+
+  perl -0pi "${patch_script}" "${target}"
+}
+
 need_file "${BUILD_FILE}"
 need_file "${SETTINGS_FILE}"
 need_file "${ROOT_BUILD_FILE}"
@@ -54,37 +66,55 @@ if ! grep -Eq "include [\"']:llmd-android[\"']" "${SETTINGS_FILE}"; then
 fi
 
 if ! grep -Fq 'namespace = "com.storytellerf.llmd"' "${BUILD_FILE}"; then
-  perl -0pi -e 's/namespace = "[^"]+"/namespace = "com.storytellerf.llmd"/' "${BUILD_FILE}"
+  apply_patch_script "${BUILD_FILE}" "${PATCHES_DIR}/transformations/namespace.perl"
 fi
 
 if ! grep -Fq 'applicationId = "com.storytellerf.llmd"' "${BUILD_FILE}"; then
-  perl -0pi -e 's/applicationId = "[^"]+"/applicationId = "com.storytellerf.llmd"/' "${BUILD_FILE}"
+  apply_patch_script "${BUILD_FILE}" "${PATCHES_DIR}/transformations/application-id.perl"
 fi
 
-perl -0pi -e 's/minSdk = \d+/minSdk = 35/' "${BUILD_FILE}"
-perl -0pi -e 's#org\.jetbrains\.kotlin:kotlin-gradle-plugin:[^"]+#org.jetbrains.kotlin:kotlin-gradle-plugin:2.2.21#' "${ROOT_BUILD_FILE}"
+if ! grep -Fq 'applicationIdSuffix = ".debug"' "${BUILD_FILE}"; then
+  apply_patch_script "${BUILD_FILE}" "${PATCHES_DIR}/insertion-points/debug-build-type.perl"
+fi
 
-perl -0pi -e 's#\n\s*sourceSets\s*\{\s*getByName\("main"\)\s*\{\s*java\.srcDir\("../../../android/llmd-ipc/src/main/java"\)\s*aidl\.srcDir\("../../../android/llmd-ipc/src/main/aidl"\)\s*\}\s*\}\n#\n#s' "${BUILD_FILE}"
-perl -0pi -e 's#\n\s*implementation\("com\.google\.ai\.edge\.litertlm:litertlm-android:[^"]+"\)##' "${BUILD_FILE}"
-perl -0pi -e 's#\n\s*implementation\("androidx\.datastore:datastore-preferences:[^"]+"\)##' "${BUILD_FILE}"
+apply_patch_script "${BUILD_FILE}" "${PATCHES_DIR}/transformations/min-sdk.perl"
+apply_patch_script "${ROOT_BUILD_FILE}" "${PATCHES_DIR}/transformations/kotlin-gradle-plugin.perl"
+
+if ! grep -Fq 'gradlePluginPortal()' "${ROOT_BUILD_FILE}"; then
+  apply_patch_script "${ROOT_BUILD_FILE}" "${PATCHES_DIR}/insertion-points/gradle-plugin-portal.perl"
+fi
+
+if ! grep -Fq 'com.starter.easylauncher.gradle.plugin:6.4.1' "${ROOT_BUILD_FILE}"; then
+  apply_patch_script "${ROOT_BUILD_FILE}" "${PATCHES_DIR}/insertion-points/easylauncher-classpath.perl"
+  apply_template "${ROOT_BUILD_FILE}" "__LLMD_EASYLAUNCHER_CLASSPATH__" "${PATCHES_DIR}/easylauncher-classpath.gradle.kts"
+fi
+
+apply_patch_script "${BUILD_FILE}" "${PATCHES_DIR}/transformations/remove-generated-ipc-source-sets.perl"
+apply_patch_script "${BUILD_FILE}" "${PATCHES_DIR}/transformations/remove-litertlm-dependency.perl"
+apply_patch_script "${BUILD_FILE}" "${PATCHES_DIR}/transformations/remove-datastore-dependency.perl"
 
 if ! grep -Fq 'implementation(project(":llmd-android"))' "${BUILD_FILE}"; then
-  perl -0pi -e 's#(\ndependencies \{\n)#$1__LLMD_ANDROID_DEPENDENCY__\n#' "${BUILD_FILE}"
+  apply_patch_script "${BUILD_FILE}" "${PATCHES_DIR}/insertion-points/android-dependency.perl"
   apply_template "${BUILD_FILE}" "__LLMD_ANDROID_DEPENDENCY__" "${PATCHES_DIR}/app-dependency.gradle.kts"
 fi
 
 if ! grep -Fq 'storyteller_f_sign_key' "${BUILD_FILE}"; then
-  perl -0pi -e 's#(\n    buildTypes \{)#\n__LLMD_ANDROID_SIGNING__$1#' "${BUILD_FILE}"
+  apply_patch_script "${BUILD_FILE}" "${PATCHES_DIR}/insertion-points/android-signing.perl"
   apply_template "${BUILD_FILE}" "__LLMD_ANDROID_SIGNING__" "${PATCHES_DIR}/signing.gradle.kts"
 fi
 
 if ! grep -Fq 'create("daily")' "${BUILD_FILE}" && ! grep -Fq 'create("e2e")' "${BUILD_FILE}"; then
-  perl -0pi -e 's#(\n    \}\n    kotlinOptions \{)#\n__LLMD_ANDROID_BUILD_TYPES__$1#' "${BUILD_FILE}"
+  apply_patch_script "${BUILD_FILE}" "${PATCHES_DIR}/insertion-points/custom-build-types.perl"
   apply_template "${BUILD_FILE}" "__LLMD_ANDROID_BUILD_TYPES__" "${PATCHES_DIR}/build-types.gradle.kts"
 elif ! grep -Fq 'create("daily")' "${BUILD_FILE}" || ! grep -Fq 'create("e2e")' "${BUILD_FILE}"; then
   echo "Generated Android project contains only one llmd custom build type." >&2
   echo "Regenerate the Android project before rerunning this script." >&2
   exit 1
+fi
+
+if ! grep -Fq 'apply(plugin = "com.starter.easylauncher")' "${BUILD_FILE}"; then
+  apply_patch_script "${BUILD_FILE}" "${PATCHES_DIR}/insertion-points/easylauncher-plugin.perl"
+  apply_template "${BUILD_FILE}" "__LLMD_EASYLAUNCHER_PLUGIN__" "${PATCHES_DIR}/easylauncher.gradle.kts"
 fi
 
 if ! grep -Fq 'MainActivity$ModelImportBridge' "${PROGUARD_FILE}"; then
