@@ -104,9 +104,14 @@ object LlmdAndroidBridge {
     internal fun parseMessages(array: JSONArray): List<LlmdChatMessage> =
         (0 until array.length()).map { index ->
             val item = array.getJSONObject(index)
+            val role = item.getString("role")
+            val content = parseContent(item.get("content"))
+            require(role != "system" || content.none { it is LlmdChatContent.Image }) {
+                "System messages must not contain images"
+            }
             LlmdChatMessage(
-                role = item.getString("role"),
-                content = parseContent(item.get("content")),
+                role = role,
+                content = content,
             )
         }
 

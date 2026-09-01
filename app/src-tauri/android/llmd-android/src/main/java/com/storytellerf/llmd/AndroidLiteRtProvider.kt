@@ -111,9 +111,10 @@ class AndroidLiteRtProvider(
         temperature: Double,
     ): String {
         val activeEngine = requireNotNull(engine) { "LiteRT-LM engine is not initialized" }
-        val lastUserMessage = messages.lastOrNull { it.role == "user" }?.toLiteRtContents()
-            ?: error("No user message to send")
-        val initialMessages = messages.dropLast(1).mapNotNull { it.toLiteRtMessage() }
+        val lastUserIndex = messages.indexOfLast { it.role == "user" }
+        require(lastUserIndex >= 0) { "No user message to send" }
+        val lastUserMessage = messages[lastUserIndex].toLiteRtContents()
+        val initialMessages = messages.take(lastUserIndex).mapNotNull { it.toLiteRtMessage() }
         val result = StringBuilder()
         val startedAt = SystemClock.elapsedRealtime()
 

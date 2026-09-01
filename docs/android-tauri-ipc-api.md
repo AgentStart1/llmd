@@ -13,8 +13,9 @@ apps bind to `com.storytellerf.llmd.action.BIND_IPC` and use the `ILlmdService` 
 `chatCompletionAsync` accepts OpenAI-style message content as either a plain string or a content
 array. Android multi-modal requests may include text parts and Base64 `data:` image URLs in
 `image_url` parts. JPEG, PNG, and WebP images are supported, with a 750,000-byte decoded limit per
-image; only one image may appear across all messages in a request. The Android LiteRT engine enables its vision backend for the
-default Gemma model and passes image bytes directly to LiteRT-LM instead of tokenizing Base64 text.
+image; only one image may appear across all messages in a request. System messages must contain
+text only. The Android LiteRT engine enables its vision backend for the default Gemma model and
+passes image bytes directly to LiteRT-LM instead of tokenizing Base64 text.
 The engine prefers the LiteRT GPU backend for both language and vision execution. If GPU engine
 initialization or inference fails on a device, it closes that engine and retries the same request
 with CPU. Android manifests declare the optional `libvndksupport.so` and `libOpenCL.so` vendor
