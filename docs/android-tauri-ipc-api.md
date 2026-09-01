@@ -10,6 +10,17 @@ apps bind to `com.storytellerf.llmd.action.BIND_IPC` and use the `ILlmdService` 
 - `listModelsAsync`, and
 - `chatCompletionAsync`.
 
+`chatCompletionAsync` accepts OpenAI-style message content as either a plain string or a content
+array. Android multi-modal requests may include text parts and Base64 `data:` image URLs in
+`image_url` parts. JPEG, PNG, and WebP images are supported, with a 750,000-byte decoded limit per
+image; only one image may appear across all messages in a request. The Android LiteRT engine enables its vision backend for the
+default Gemma model and passes image bytes directly to LiteRT-LM instead of tokenizing Base64 text.
+The engine prefers the LiteRT GPU backend for both language and vision execution. If GPU engine
+initialization or inference fails on a device, it closes that engine and retries the same request
+with CPU. Android manifests declare the optional `libvndksupport.so` and `libOpenCL.so` vendor
+libraries so supported devices can load their OpenCL driver. Logcat entries tagged `llmd` report
+the selected backend and initialization/generation duration.
+
 Each external caller must be authorized through
 `com.storytellerf.llmd.action.AUTHORIZE_CALLER` before IPC calls return model or chat results.
 The Android application IDs are `com.storytellerf.llmd` for Release, `com.storytellerf.llmd.daily`

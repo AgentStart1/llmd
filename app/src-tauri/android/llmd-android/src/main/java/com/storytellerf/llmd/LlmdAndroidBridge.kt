@@ -1,6 +1,7 @@
 package com.storytellerf.llmd
 
 import android.content.Context
+import android.util.Base64
 import java.io.File
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -79,7 +80,13 @@ object LlmdAndroidBridge {
         }
 
         val messages = parseMessages(request.getJSONArray("messages"))
-        val systemPrompt = messages.firstOrNull { it.role == "system" }?.content ?: ""
+        val imageCount = messages.sumOf { message ->
+            message.content.count { it is LlmdChatContent.Image }
+        }
+        require(imageCount <= MAX_IMAGES_PER_REQUEST) {
+            "A request may contain at most $MAX_IMAGES_PER_REQUEST image"
+        }
+        val systemPrompt = messages.firstOrNull { it.role == "system" }?.text ?: ""
         val temperature = when {
             request.isNull("temperature") -> 0.0
             else -> request.optDouble("temperature", 0.0)
@@ -94,14 +101,44 @@ object LlmdAndroidBridge {
         )
     }
 
-    private fun parseMessages(array: JSONArray): List<LlmdChatMessage> =
+    internal fun parseMessages(array: JSONArray): List<LlmdChatMessage> =
         (0 until array.length()).map { index ->
             val item = array.getJSONObject(index)
             LlmdChatMessage(
                 role = item.getString("role"),
-                content = item.getString("content"),
+                content = parseContent(item.get("content")),
             )
         }
+
+    private fun parseContent(value: Any): List<LlmdChatContent> = when (value) {
+        is String -> listOf(LlmdChatContent.Text(value))
+        is JSONArray -> (0 until value.length()).map { index ->
+            val part = value.getJSONObject(index)
+            when (val type = part.getString("type")) {
+                "text" -> LlmdChatContent.Text(part.getString("text"))
+                "image_url" -> parseImageUrl(part.get("image_url"))
+                else -> throw IllegalArgumentException("Unsupported message content type: $type")
+            }
+        }
+        else -> throw IllegalArgumentException("Message content must be a string or content array")
+    }
+
+    private fun parseImageUrl(value: Any): LlmdChatContent.Image {
+        val url = when (value) {
+            is String -> value
+            is JSONObject -> value.getString("url")
+            else -> throw IllegalArgumentException("image_url must be a string or object")
+        }
+        val match = DATA_IMAGE_PATTERN.matchEntire(url)
+            ?: throw IllegalArgumentException("Only Base64 data image URLs are supported on Android")
+        val mimeType = match.groupValues[1].lowercase()
+        require(mimeType in SUPPORTED_IMAGE_MIME_TYPES) { "Unsupported image type: $mimeType" }
+        val bytes = runCatching { Base64.decode(match.groupValues[2], Base64.DEFAULT) }
+            .getOrElse { throw IllegalArgumentException("Image data is not valid Base64", it) }
+        require(bytes.isNotEmpty()) { "Image data is empty" }
+        require(bytes.size <= MAX_IMAGE_BYTES) { "Image exceeds the $MAX_IMAGE_BYTES byte limit" }
+        return LlmdChatContent.Image(bytes, mimeType)
+    }
 
     private fun File.isUsableModelFile(): Boolean = exists() && isFile && length() > 0L
 
@@ -111,4 +148,7 @@ object LlmdAndroidBridge {
     private const val DEFAULT_MODEL = "gemma-4-E2B-it"
     private const val DEFAULT_MODEL_FILE_NAME = "$DEFAULT_MODEL.litertlm"
     private const val MODEL_DIR = "models"
+    private const val MAX_IMAGE_BYTES = 750_000
+    private val DATA_IMAGE_PATTERN = Regex("""data:(image/[a-zA-Z0-9.+-]+);base64,([a-zA-Z0-9+/=\r\n]+)""")
+    private val SUPPORTED_IMAGE_MIME_TYPES = setOf("image/jpeg", "image/png", "image/webp")
 }
