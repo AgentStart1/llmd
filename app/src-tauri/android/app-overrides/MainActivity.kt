@@ -26,7 +26,11 @@ class MainActivity : TauriActivity() {
     }
 
     activityScope.launch {
-      val result = runCatching { copyDefaultModel(uri) }
+      val result = runCatching {
+        LlmdAndroidBridge.close()
+        copyDefaultModel(uri)
+        LlmdAndroidBridge.initialize(this@MainActivity)
+      }
       emitModelMutation(
         status = if (result.isSuccess) "imported" else "error",
         error = result.exceptionOrNull()?.message,

@@ -13,95 +13,128 @@ import com.google.ai.edge.litertlm.Message
 import com.google.ai.edge.litertlm.SamplerConfig
 import java.io.File
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.collect
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class AndroidLiteRtProvider(
     private val cacheDir: String,
     private val log: (String) -> Unit,
 ) {
-    private val engineMutex = Mutex()
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val commands = Channel<Pair<CompletableDeferred<Unit>, Job>>(Channel.UNLIMITED)
+
+    @Volatile
+    private var ready = false
+
+    @Volatile
+    private var closed = false
     private var loadedModelPath: String? = null
-    private var loadedBackend: BackendKind? = null
     private var engine: Engine? = null
 
-    suspend fun close() = engineMutex.withLock {
-        closeLocked()
+    init {
+        scope.launch {
+            for ((start, command) in commands) {
+                start.complete(Unit)
+                command.join()
+            }
+        }
     }
 
-    private fun closeLocked() {
+    fun isReady(): Boolean = ready && !closed
+
+    private fun <T> enqueue(block: suspend () -> T): kotlinx.coroutines.Deferred<T> {
+        val start = CompletableDeferred<Unit>()
+        return scope.async { start.await(); block() }.also { task ->
+            if (closed || commands.trySend(start to task).isFailure) {
+                task.cancel()
+                error("LiteRT-LM provider is closed")
+            }
+        }
+    }
+
+    suspend fun initialize(modelPath: String) {
+        enqueue { initializeEngine(modelPath) }.await()
+    }
+
+    suspend fun close() {
+        if (closed) return
+        ready = false
+        val closing = enqueue {
+            try {
+                engine?.close()
+            } finally {
+                engine = null
+                loadedModelPath = null
+                ready = false
+            }
+        }
+        closed = true
+        try {
+            withContext(NonCancellable) { closing.await() }
+        } finally {
+            commands.close()
+            scope.cancel()
+        }
+    }
+
+    private fun initializeEngine(modelPath: String) {
+        val file = File(modelPath)
+        require(file.isFile && file.length() > 0L) { "Model file is missing or empty: $modelPath" }
+        if (loadedModelPath == file.absolutePath && isReady()) return
+        ready = false
         engine?.close()
         engine = null
         loadedModelPath = null
-        loadedBackend = null
-    }
-
-    private fun initializeLocked(
-        modelPath: String,
-        backendCandidates: List<BackendKind> = listOf(BackendKind.GPU, BackendKind.CPU),
-    ) {
-        val file = File(modelPath)
-        require(file.exists()) { "Model file does not exist: $modelPath" }
-        require(file.length() > 0L) { "Model file is empty: $modelPath" }
-        if (loadedModelPath == file.absolutePath && engine?.isInitialized() == true) return
-
-        closeLocked()
-        var lastError: Exception? = null
-        backendCandidates.distinct().forEach { backendKind ->
-            val selectedBackend = backendKind.create()
-            val startedAt = SystemClock.elapsedRealtime()
-            log("Initializing LiteRT-LM model ${file.absolutePath} with ${selectedBackend.name}")
-            val candidateEngine = Engine(
-                EngineConfig(
-                    modelPath = file.absolutePath,
-                    backend = selectedBackend,
-                    visionBackend = selectedBackend,
-                    audioBackend = null,
-                    maxNumTokens = null,
-                    maxNumImages = MAX_IMAGES_PER_REQUEST,
-                    cacheDir = cacheDir,
-                ),
-            )
-            try {
-                candidateEngine.initialize()
-                engine = candidateEngine
-                loadedModelPath = file.absolutePath
-                loadedBackend = backendKind
-                log(
-                    "LiteRT-LM model initialized with ${selectedBackend.name} in " +
-                        "${SystemClock.elapsedRealtime() - startedAt} ms",
-                )
-                return
-            } catch (error: Exception) {
-                runCatching { candidateEngine.close() }
-                lastError = error
-                log(
-                    "LiteRT-LM ${selectedBackend.name} initialization failed after " +
-                        "${SystemClock.elapsedRealtime() - startedAt} ms: ${error.message}",
-                )
-            }
+        val startedAt = SystemClock.elapsedRealtime()
+        val candidate = Engine(
+            EngineConfig(
+                modelPath = file.absolutePath,
+                backend = Backend.GPU(),
+                visionBackend = Backend.GPU(),
+                audioBackend = null,
+                maxNumTokens = null,
+                maxNumImages = MAX_IMAGES_PER_REQUEST,
+                cacheDir = cacheDir,
+            ),
+        )
+        try {
+            candidate.initialize()
+            engine = candidate
+            loadedModelPath = file.absolutePath
+            ready = !closed
+            log("LiteRT-LM GPU initialized in ${SystemClock.elapsedRealtime() - startedAt} ms")
+        } catch (error: Exception) {
+            runCatching { candidate.close() }
+            throw error
         }
-        throw IllegalStateException("Unable to initialize LiteRT-LM with GPU or CPU", lastError)
     }
 
-    suspend fun generate(
-        modelPath: String,
+    fun generate(
         systemPrompt: String,
         messages: List<LlmdChatMessage>,
         temperature: Double,
-    ): String = engineMutex.withLock {
-        initializeLocked(modelPath)
-        try {
-            generateLocked(systemPrompt, messages, temperature)
-        } catch (error: CancellationException) {
-            throw error
-        } catch (error: Exception) {
-            if (loadedBackend != BackendKind.GPU) throw error
-            log("LiteRT-LM GPU inference failed: ${error.message}; retrying with CPU")
-            closeLocked()
-            initializeLocked(modelPath, listOf(BackendKind.CPU))
-            generateLocked(systemPrompt, messages, temperature)
+        onComplete: (Result<String>) -> Unit,
+    ): Job {
+        check(isReady()) { "LiteRT-LM engine is not ready" }
+        return enqueue {
+            check(isReady()) { "LiteRT-LM engine is not ready" }
+            try {
+                onComplete(Result.success(generateLocked(systemPrompt, messages, temperature)))
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                onComplete(Result.failure(error))
+            }
         }
     }
 
@@ -142,7 +175,7 @@ class AndroidLiteRtProvider(
 
         return result.toString().trim().also {
             log(
-                "LiteRT-LM generation completed with ${loadedBackend?.label} in " +
+                "LiteRT-LM generation completed with GPU in " +
                     "${SystemClock.elapsedRealtime() - startedAt} ms",
             )
         }
@@ -178,16 +211,6 @@ class AndroidLiteRtProvider(
             .getOrDefault(message.toString())
             .stripChatTemplateMarkers()
 
-    private enum class BackendKind(val label: String) {
-        GPU("GPU"),
-        CPU("CPU"),
-        ;
-
-        fun create(): Backend = when (this) {
-            GPU -> Backend.GPU()
-            CPU -> Backend.CPU()
-        }
-    }
 }
 
 fun String.stripChatTemplateMarkers(): String =

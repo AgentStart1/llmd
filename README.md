@@ -116,14 +116,6 @@ enabled while remaining debug-signed for local installation:
 ANDROID_UDID=<device-serial> scripts/test-android-appium.sh --e2e
 ```
 
-Launcher icons identify installed non-Release variants: Debug has a red `DEBUG` ribbon, Daily a
-purple `DAILY` ribbon, and E2E a blue `E2E` ribbon. Release uses the unmodified icon.
-
-Pull requests to `main` run the host and Android test workflow. Pushes to `main` build the
-release-signed Daily APK, while pushed tags build and publish the Release APK. Workflow actions
-are pinned to immutable commit SHAs; Dependabot checks GitHub Actions and Android Gradle
-dependencies weekly.
-
 Android exposes LiteRT-LM to other Android apps only through its authorized Binder IPC interface;
 it does not listen on a device TCP port. See `docs/android-tauri-ipc-api.md`.
 

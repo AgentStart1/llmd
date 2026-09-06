@@ -11,16 +11,34 @@ apps bind to `com.storytellerf.llmd.action.BIND_IPC` and use the `ILlmdService` 
 - `chatCompletionAsync`.
 
 `chatCompletionAsync` accepts OpenAI-style message content as either a plain string or a content
-array. Android multi-modal requests may include text parts and Base64 `data:` image URLs in
-`image_url` parts. JPEG, PNG, and WebP images are supported, with a 750,000-byte decoded limit per
-image; only one image may appear across all messages in a request. System messages must contain
-text only. The Android LiteRT engine enables its vision backend for the default Gemma model and
-passes image bytes directly to LiteRT-LM instead of tokenizing Base64 text.
-The engine prefers the LiteRT GPU backend for both language and vision execution. If GPU engine
-initialization or inference fails on a device, it closes that engine and retries the same request
-with CPU. Android manifests declare the optional `libvndksupport.so` and `libOpenCL.so` vendor
-libraries so supported devices can load their OpenCL driver. Logcat entries tagged `llmd` report
-the selected backend and initialization/generation duration.
+array. Android multi-modal requests may include text parts and a `content://` URI in `image_url`
+parts. The URI must come from the calling app's `FileProvider`, and the caller must grant llmd
+temporary read access before making the Binder call. Keeping image bytes outside `requestJson`
+prevents Base64 expansion from exceeding Binder's transaction limit.
+
+For example, the calling app can create and grant an image URI before building the request:
+
+```kotlin
+val imageUri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", imageFile)
+val llmdPackageName = "com.storytellerf.llmd" // Use the package of the bound llmd variant.
+context.grantUriPermission(
+    llmdPackageName,
+    imageUri,
+    Intent.FLAG_GRANT_READ_URI_PERMISSION,
+)
+```
+
+JPEG, PNG, and WebP images are supported, with a 750,000-byte limit per image; only one image may
+appear across all messages in a request. The service verifies the URI owner, MIME type, decoded
+image bounds, and read grant before passing image bytes to LiteRT-LM. System messages must contain
+text only.
+
+The LiteRT engine uses the GPU backend for language and vision execution. GPU initialization or
+inference failure is returned to the caller instead of retrying on CPU. The health response includes
+`engineReady`; callers should wait for it to become `true`, because generation requests fail
+immediately while the engine is initializing or unavailable. Android manifests declare the optional
+`libvndksupport.so` and `libOpenCL.so` vendor libraries so supported devices can load their OpenCL
+driver. Logcat entries tagged `llmd` report initialization and generation duration.
 
 Each external caller must be authorized through
 `com.storytellerf.llmd.action.AUTHORIZE_CALLER` before IPC calls return model or chat results.
