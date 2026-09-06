@@ -353,6 +353,8 @@ async fn import_model_with_appium(config: &Config) -> Result<()> {
 }
 
 async fn run_ipc_sample(config: &Config) -> Result<()> {
+    const SAMPLE_UI_DUMP: &str = "/sdcard/llmd-provider-sample.xml";
+
     let component = format!("{}/{}", config.sample_package, SAMPLE_ACTIVITY);
     run_status(command("adb", config).args([
         "shell",
@@ -380,18 +382,12 @@ async fn run_ipc_sample(config: &Config) -> Result<()> {
     client.clone().close().await.ok();
     authorization_result?;
 
+    run_status(command("adb", config).args(["shell", "rm", "-f", SAMPLE_UI_DUMP]))?;
     let deadline = std::time::Instant::now() + Duration::from_secs(900);
     while std::time::Instant::now() < deadline {
-        let _ = command("adb", config)
-            .args([
-                "shell",
-                "uiautomator",
-                "dump",
-                "/sdcard/llmd-provider-sample.xml",
-            ])
-            .status();
+        run_status(command("adb", config).args(["shell", "uiautomator", "dump", SAMPLE_UI_DUMP]))?;
         let output = command("adb", config)
-            .args(["shell", "cat", "/sdcard/llmd-provider-sample.xml"])
+            .args(["shell", "cat", SAMPLE_UI_DUMP])
             .output()
             .context("read LiteRT-LM sample UI state")?;
         let state = String::from_utf8_lossy(&output.stdout);

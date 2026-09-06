@@ -9,6 +9,8 @@
         }
         create("e2e") {
             initWith(getByName("release"))
+            applicationIdSuffix = ".e2e"
+            versionNameSuffix = "-e2e"
             isDebuggable = false
             isJniDebuggable = false
             signingConfig = signingConfigs.getByName("debug")
