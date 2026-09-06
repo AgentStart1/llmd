@@ -6,6 +6,8 @@ ANDROID_ROOT_DIR="${ROOT_DIR}/app/src-tauri/gen/android"
 ANDROID_APP_DIR="${ANDROID_ROOT_DIR}/app"
 ANDROID_LIBRARY_DIR="${ROOT_DIR}/app/src-tauri/android/llmd-android"
 MAIN_ACTIVITY_OVERRIDE="${ROOT_DIR}/app/src-tauri/android/app-overrides/MainActivity.kt"
+SAMPLE_ACTIVITY_OVERRIDE="${ROOT_DIR}/app/src-tauri/android/app-overrides/LiteRtProviderSampleActivity.kt"
+SAMPLE_MANIFEST_OVERRIDE="${ROOT_DIR}/app/src-tauri/android/app-overrides/debug/AndroidManifest.xml"
 PATCHES_DIR="${ROOT_DIR}/app/src-tauri/android/patches"
 SETTINGS_FILE="${ANDROID_ROOT_DIR}/settings.gradle"
 ROOT_BUILD_FILE="${ANDROID_ROOT_DIR}/build.gradle.kts"
@@ -54,6 +56,8 @@ need_file "${ROOT_BUILD_FILE}"
 need_file "${MANIFEST_FILE}"
 need_file "${PROGUARD_FILE}"
 need_file "${MAIN_ACTIVITY_OVERRIDE}"
+need_file "${SAMPLE_ACTIVITY_OVERRIDE}"
+need_file "${SAMPLE_MANIFEST_OVERRIDE}"
 
 if [[ ! -d "${ANDROID_LIBRARY_DIR}" ]]; then
   echo "Missing Android library: ${ANDROID_LIBRARY_DIR}" >&2
@@ -125,5 +129,13 @@ fi
 MAIN_ACTIVITY_TARGET="${ANDROID_APP_DIR}/src/main/java/com/storytellerf/llmd/MainActivity.kt"
 mkdir -p "$(dirname "${MAIN_ACTIVITY_TARGET}")"
 cp "${MAIN_ACTIVITY_OVERRIDE}" "${MAIN_ACTIVITY_TARGET}"
+
+for sample_build_type in debug e2e; do
+  SAMPLE_ACTIVITY_TARGET="${ANDROID_APP_DIR}/src/${sample_build_type}/java/com/storytellerf/llmd/LiteRtProviderSampleActivity.kt"
+  SAMPLE_MANIFEST_TARGET="${ANDROID_APP_DIR}/src/${sample_build_type}/AndroidManifest.xml"
+  mkdir -p "$(dirname "${SAMPLE_ACTIVITY_TARGET}")"
+  cp "${SAMPLE_ACTIVITY_OVERRIDE}" "${SAMPLE_ACTIVITY_TARGET}"
+  cp "${SAMPLE_MANIFEST_OVERRIDE}" "${SAMPLE_MANIFEST_TARGET}"
+done
 
 echo "Synced Tauri Android llmd overrides."

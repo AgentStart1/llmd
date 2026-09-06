@@ -18,6 +18,7 @@ use appium_client::{
 const RELEASE_PACKAGE: &str = "com.storytellerf.llmd";
 const DEBUG_PACKAGE: &str = "com.storytellerf.llmd.debug";
 const MAIN_ACTIVITY: &str = "com.storytellerf.llmd.MainActivity";
+const PROVIDER_SAMPLE_ACTIVITY: &str = "com.storytellerf.llmd.LiteRtProviderSampleActivity";
 const DEFAULT_MODEL: &str = "gemma-4-E2B-it";
 
 #[tokio::main]
@@ -36,6 +37,7 @@ async fn main() -> Result<()> {
         let _ = child.wait();
     }
     appium_result?;
+    run_provider_sample(&config)?;
 
     Ok(())
 }
@@ -294,6 +296,37 @@ async fn import_model_with_appium(config: &Config) -> Result<()> {
 
     client.clone().close().await.ok();
     result
+}
+
+fn run_provider_sample(config: &Config) -> Result<()> {
+    let component = format!("{}/{}", config.android_package, PROVIDER_SAMPLE_ACTIVITY);
+    run_status(command("adb", config).args(["shell", "am", "start", "-n", &component]))?;
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(900);
+    while std::time::Instant::now() < deadline {
+        let _ = command("adb", config)
+            .args([
+                "shell",
+                "uiautomator",
+                "dump",
+                "/sdcard/llmd-provider-sample.xml",
+            ])
+            .status();
+        let output = command("adb", config)
+            .args(["shell", "cat", "/sdcard/llmd-provider-sample.xml"])
+            .output()
+            .context("read LiteRT-LM sample UI state")?;
+        let state = String::from_utf8_lossy(&output.stdout);
+        if state.contains("PASS:") {
+            return Ok(());
+        }
+        if state.contains("FAIL:") {
+            bail!("LiteRT-LM provider sample failed: {state}");
+        }
+        std::thread::sleep(Duration::from_secs(1));
+    }
+
+    bail!("LiteRT-LM provider sample timed out")
 }
 
 async fn select_model_in_picker(

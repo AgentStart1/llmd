@@ -37,6 +37,7 @@ class AndroidLiteRtProvider(
         INITIALIZING,
         INITIALIZED,
         ERROR,
+        CLOSED,
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -50,16 +51,18 @@ class AndroidLiteRtProvider(
     private var closed = false
     private var loadedModelPath: String? = null
     private var engine: Engine? = null
+    private val initializationJob: Job
 
     init {
-        scope.launch {
+        initializationJob = scope.launch {
+            initializeEngine()
+            if (closed) return@launch
+
+            initializationState = InitializationState.INITIALIZED
             for ((start, command) in commands) {
                 start.complete(Unit)
                 command.join()
             }
-        }
-        scope.launch {
-            initialize()
         }
     }
 
@@ -75,11 +78,10 @@ class AndroidLiteRtProvider(
         }
     }
 
-    private suspend fun initialize() {
+    private fun initializeEngine() {
         initializationState = InitializationState.INITIALIZING
         try {
-            enqueue { initializeEngine() }.await()
-            if (!closed) initializationState = InitializationState.INITIALIZED
+            initializeEngineLocked()
         } catch (error: CancellationException) {
             throw error
         } catch (error: Exception) {
@@ -87,30 +89,26 @@ class AndroidLiteRtProvider(
                 initializationState = InitializationState.ERROR
                 log("LiteRT-LM initialization failed: ${error.message ?: error::class.java.simpleName}")
             }
+            commands.close(error)
         }
     }
 
     suspend fun close() {
         if (closed) return
-        val closing = enqueue {
-            try {
-                engine?.close()
-            } finally {
-                engine = null
-                loadedModelPath = null
-                initializationState = InitializationState.UNINITIALIZED
-            }
-        }
         closed = true
         try {
-            withContext(NonCancellable) { closing.await() }
-        } finally {
             commands.close()
             scope.cancel()
+            withContext(NonCancellable) { initializationJob.join() }
+        } finally {
+            withContext(NonCancellable) { engine?.close() }
+            engine = null
+            loadedModelPath = null
+            initializationState = InitializationState.CLOSED
         }
     }
 
-    private fun initializeEngine() {
+    private fun initializeEngineLocked() {
         val file = File(modelPath)
         require(file.isFile && file.length() > 0L) { "Model file is missing or empty: $modelPath" }
         if (loadedModelPath == file.absolutePath && isReady()) return
@@ -131,6 +129,10 @@ class AndroidLiteRtProvider(
         )
         try {
             candidate.initialize()
+            if (closed) {
+                candidate.close()
+                return
+            }
             engine = candidate
             loadedModelPath = file.absolutePath
             log("LiteRT-LM GPU initialized in ${SystemClock.elapsedRealtime() - startedAt} ms")
