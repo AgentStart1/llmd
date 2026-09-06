@@ -5,7 +5,7 @@ import android.graphics.BitmapFactory
 import android.net.Uri
 import java.io.ByteArrayOutputStream
 import java.io.File
-import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import org.json.JSONArray
@@ -26,11 +26,11 @@ object LlmdAndroidBridge {
     suspend fun initialize(context: Context) = providerMutex.withLock {
         configure(context)
         if (provider == null) {
-            provider = AndroidLiteRtProvider(context.applicationContext.cacheDir.absolutePath) {
-                android.util.Log.i("llmd", it)
-            }
+            provider = AndroidLiteRtProvider(
+                modelPath = selectedModelPath,
+                cacheDir = context.applicationContext.cacheDir.absolutePath,
+            ) { android.util.Log.i("llmd", it) }
         }
-        provider?.initialize(selectedModelPath)
     }
 
     suspend fun close() = providerMutex.withLock {
@@ -68,6 +68,10 @@ object LlmdAndroidBridge {
         .put("provider", "litert-lm-android")
         .put("transport", "binder_ipc")
         .put("engineReady", provider?.isReady() == true)
+        .put(
+            "engineState",
+            provider?.initializationState?.name?.lowercase() ?: "uninitialized",
+        )
         .toString()
 
     private fun listModelsSync(): List<String> =
@@ -98,17 +102,16 @@ object LlmdAndroidBridge {
         }
         val activeProvider = requireNotNull(provider) { "Android LiteRT bridge is not initialized" }
 
-        return suspendCancellableCoroutine { continuation ->
-            val job = activeProvider.generate(
-                systemPrompt = systemPrompt,
-                messages = messages,
-                temperature = temperature,
-                onComplete = { continuation.resumeWith(it) },
-            )
-            continuation.invokeOnCancellation { job.cancel() }
-            job.invokeOnCompletion { error ->
-                if (error != null) continuation.cancel(error)
-            }
+        val task = activeProvider.generate(
+            systemPrompt = systemPrompt,
+            messages = messages,
+            temperature = temperature,
+        )
+        return try {
+            task.await()
+        } catch (error: CancellationException) {
+            task.cancel(error)
+            throw error
         }
     }
 

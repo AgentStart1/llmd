@@ -15,6 +15,7 @@ import java.io.File
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
@@ -27,14 +28,23 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 class AndroidLiteRtProvider(
+    private val modelPath: String,
     private val cacheDir: String,
     private val log: (String) -> Unit,
 ) {
+    enum class InitializationState {
+        UNINITIALIZED,
+        INITIALIZING,
+        INITIALIZED,
+        ERROR,
+    }
+
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val commands = Channel<Pair<CompletableDeferred<Unit>, Job>>(Channel.UNLIMITED)
 
     @Volatile
-    private var ready = false
+    var initializationState = InitializationState.UNINITIALIZED
+        private set
 
     @Volatile
     private var closed = false
@@ -48,11 +58,14 @@ class AndroidLiteRtProvider(
                 command.join()
             }
         }
+        scope.launch {
+            initialize()
+        }
     }
 
-    fun isReady(): Boolean = ready && !closed
+    fun isReady(): Boolean = initializationState == InitializationState.INITIALIZED && !closed
 
-    private fun <T> enqueue(block: suspend () -> T): kotlinx.coroutines.Deferred<T> {
+    private fun <T> enqueue(block: suspend () -> T): Deferred<T> {
         val start = CompletableDeferred<Unit>()
         return scope.async { start.await(); block() }.also { task ->
             if (closed || commands.trySend(start to task).isFailure) {
@@ -62,20 +75,30 @@ class AndroidLiteRtProvider(
         }
     }
 
-    suspend fun initialize(modelPath: String) {
-        enqueue { initializeEngine(modelPath) }.await()
+    private suspend fun initialize() {
+        initializationState = InitializationState.INITIALIZING
+        try {
+            enqueue { initializeEngine() }.await()
+            if (!closed) initializationState = InitializationState.INITIALIZED
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            if (!closed) {
+                initializationState = InitializationState.ERROR
+                log("LiteRT-LM initialization failed: ${error.message ?: error::class.java.simpleName}")
+            }
+        }
     }
 
     suspend fun close() {
         if (closed) return
-        ready = false
         val closing = enqueue {
             try {
                 engine?.close()
             } finally {
                 engine = null
                 loadedModelPath = null
-                ready = false
+                initializationState = InitializationState.UNINITIALIZED
             }
         }
         closed = true
@@ -87,11 +110,10 @@ class AndroidLiteRtProvider(
         }
     }
 
-    private fun initializeEngine(modelPath: String) {
+    private fun initializeEngine() {
         val file = File(modelPath)
         require(file.isFile && file.length() > 0L) { "Model file is missing or empty: $modelPath" }
         if (loadedModelPath == file.absolutePath && isReady()) return
-        ready = false
         engine?.close()
         engine = null
         loadedModelPath = null
@@ -111,7 +133,6 @@ class AndroidLiteRtProvider(
             candidate.initialize()
             engine = candidate
             loadedModelPath = file.absolutePath
-            ready = !closed
             log("LiteRT-LM GPU initialized in ${SystemClock.elapsedRealtime() - startedAt} ms")
         } catch (error: Exception) {
             runCatching { candidate.close() }
@@ -123,18 +144,11 @@ class AndroidLiteRtProvider(
         systemPrompt: String,
         messages: List<LlmdChatMessage>,
         temperature: Double,
-        onComplete: (Result<String>) -> Unit,
-    ): Job {
+    ): Deferred<String> {
         check(isReady()) { "LiteRT-LM engine is not ready" }
         return enqueue {
             check(isReady()) { "LiteRT-LM engine is not ready" }
-            try {
-                onComplete(Result.success(generateLocked(systemPrompt, messages, temperature)))
-            } catch (error: CancellationException) {
-                throw error
-            } catch (error: Exception) {
-                onComplete(Result.failure(error))
-            }
+            generateLocked(systemPrompt, messages, temperature)
         }
     }
 
