@@ -55,7 +55,7 @@ class AndroidLiteRtProvider(
 
     init {
         initializationJob = scope.launch {
-            initializeEngine()
+            if (!initializeEngine()) return@launch
             if (closed) return@launch
 
             initializationState = InitializationState.INITIALIZED
@@ -78,10 +78,11 @@ class AndroidLiteRtProvider(
         }
     }
 
-    private fun initializeEngine() {
+    private fun initializeEngine(): Boolean {
         initializationState = InitializationState.INITIALIZING
-        try {
+        return try {
             initializeEngineLocked()
+            true
         } catch (error: CancellationException) {
             throw error
         } catch (error: Exception) {
@@ -90,6 +91,7 @@ class AndroidLiteRtProvider(
                 log("LiteRT-LM initialization failed: ${error.message ?: error::class.java.simpleName}")
             }
             commands.close(error)
+            false
         }
     }
 

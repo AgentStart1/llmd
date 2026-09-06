@@ -6,8 +6,7 @@ ANDROID_ROOT_DIR="${ROOT_DIR}/app/src-tauri/gen/android"
 ANDROID_APP_DIR="${ANDROID_ROOT_DIR}/app"
 ANDROID_LIBRARY_DIR="${ROOT_DIR}/app/src-tauri/android/llmd-android"
 MAIN_ACTIVITY_OVERRIDE="${ROOT_DIR}/app/src-tauri/android/app-overrides/MainActivity.kt"
-SAMPLE_ACTIVITY_OVERRIDE="${ROOT_DIR}/app/src-tauri/android/app-overrides/LiteRtProviderSampleActivity.kt"
-SAMPLE_MANIFEST_OVERRIDE="${ROOT_DIR}/app/src-tauri/android/app-overrides/debug/AndroidManifest.xml"
+SAMPLE_APP_DIR="${ROOT_DIR}/app/src-tauri/android/llmd-sample"
 PATCHES_DIR="${ROOT_DIR}/app/src-tauri/android/patches"
 SETTINGS_FILE="${ANDROID_ROOT_DIR}/settings.gradle"
 ROOT_BUILD_FILE="${ANDROID_ROOT_DIR}/build.gradle.kts"
@@ -56,17 +55,25 @@ need_file "${ROOT_BUILD_FILE}"
 need_file "${MANIFEST_FILE}"
 need_file "${PROGUARD_FILE}"
 need_file "${MAIN_ACTIVITY_OVERRIDE}"
-need_file "${SAMPLE_ACTIVITY_OVERRIDE}"
-need_file "${SAMPLE_MANIFEST_OVERRIDE}"
 
 if [[ ! -d "${ANDROID_LIBRARY_DIR}" ]]; then
   echo "Missing Android library: ${ANDROID_LIBRARY_DIR}" >&2
   exit 1
 fi
 
+if [[ ! -d "${SAMPLE_APP_DIR}" ]]; then
+  echo "Missing Android IPC sample app: ${SAMPLE_APP_DIR}" >&2
+  exit 1
+fi
+
 if ! grep -Eq "include [\"']:llmd-android[\"']" "${SETTINGS_FILE}"; then
   printf '\n__LLMD_ANDROID_SETTINGS__\n' >>"${SETTINGS_FILE}"
   apply_template "${SETTINGS_FILE}" "__LLMD_ANDROID_SETTINGS__" "${PATCHES_DIR}/settings.gradle"
+fi
+
+if ! grep -Eq "include [\"']:llmd-sample[\"']" "${SETTINGS_FILE}"; then
+  printf '\n__LLMD_SAMPLE_SETTINGS__\n' >>"${SETTINGS_FILE}"
+  apply_template "${SETTINGS_FILE}" "__LLMD_SAMPLE_SETTINGS__" "${PATCHES_DIR}/sample-settings.gradle"
 fi
 
 if ! grep -Fq 'namespace = "com.storytellerf.llmd"' "${BUILD_FILE}"; then
@@ -96,6 +103,7 @@ fi
 apply_patch_script "${BUILD_FILE}" "${PATCHES_DIR}/transformations/remove-generated-ipc-source-sets.perl"
 apply_patch_script "${BUILD_FILE}" "${PATCHES_DIR}/transformations/remove-litertlm-dependency.perl"
 apply_patch_script "${BUILD_FILE}" "${PATCHES_DIR}/transformations/remove-datastore-dependency.perl"
+apply_patch_script "${BUILD_FILE}" "${PATCHES_DIR}/transformations/rename-daily-build-type.perl"
 
 if ! grep -Fq 'implementation(project(":llmd-android"))' "${BUILD_FILE}"; then
   apply_patch_script "${BUILD_FILE}" "${PATCHES_DIR}/insertion-points/android-dependency.perl"
@@ -107,11 +115,11 @@ if ! grep -Fq 'storyteller_f_sign_key' "${BUILD_FILE}"; then
   apply_template "${BUILD_FILE}" "__LLMD_ANDROID_SIGNING__" "${PATCHES_DIR}/signing.gradle.kts"
 fi
 
-if ! grep -Fq 'create("daily")' "${BUILD_FILE}" && ! grep -Fq 'create("e2e")' "${BUILD_FILE}"; then
+if ! grep -Fq 'create("alpha")' "${BUILD_FILE}" && ! grep -Fq 'create("e2e")' "${BUILD_FILE}"; then
   apply_patch_script "${BUILD_FILE}" "${PATCHES_DIR}/insertion-points/custom-build-types.perl"
   apply_template "${BUILD_FILE}" "__LLMD_ANDROID_BUILD_TYPES__" "${PATCHES_DIR}/build-types.gradle.kts"
-elif ! grep -Fq 'create("daily")' "${BUILD_FILE}" || ! grep -Fq 'create("e2e")' "${BUILD_FILE}"; then
-  echo "Generated Android project contains only one llmd custom build type." >&2
+elif ! grep -Fq 'create("alpha")' "${BUILD_FILE}" || ! grep -Fq 'create("e2e")' "${BUILD_FILE}"; then
+  echo "Generated Android project does not contain all llmd custom build types." >&2
   echo "Regenerate the Android project before rerunning this script." >&2
   exit 1
 fi
@@ -129,13 +137,5 @@ fi
 MAIN_ACTIVITY_TARGET="${ANDROID_APP_DIR}/src/main/java/com/storytellerf/llmd/MainActivity.kt"
 mkdir -p "$(dirname "${MAIN_ACTIVITY_TARGET}")"
 cp "${MAIN_ACTIVITY_OVERRIDE}" "${MAIN_ACTIVITY_TARGET}"
-
-for sample_build_type in debug e2e; do
-  SAMPLE_ACTIVITY_TARGET="${ANDROID_APP_DIR}/src/${sample_build_type}/java/com/storytellerf/llmd/LiteRtProviderSampleActivity.kt"
-  SAMPLE_MANIFEST_TARGET="${ANDROID_APP_DIR}/src/${sample_build_type}/AndroidManifest.xml"
-  mkdir -p "$(dirname "${SAMPLE_ACTIVITY_TARGET}")"
-  cp "${SAMPLE_ACTIVITY_OVERRIDE}" "${SAMPLE_ACTIVITY_TARGET}"
-  cp "${SAMPLE_MANIFEST_OVERRIDE}" "${SAMPLE_MANIFEST_TARGET}"
-done
 
 echo "Synced Tauri Android llmd overrides."

@@ -42,18 +42,21 @@ driver. Logcat entries tagged `llmd` report initialization and generation durati
 
 Each external caller must be authorized through
 `com.storytellerf.llmd.action.AUTHORIZE_CALLER` before IPC calls return model or chat results.
-The Android application IDs are `com.storytellerf.llmd` for Release, `com.storytellerf.llmd.daily`
-for Daily, and `com.storytellerf.llmd.debug` for Debug. The exported component classes and intent
-actions retain the base `com.storytellerf.llmd` namespace across all variants.
+The Android application IDs are `com.storytellerf.llmd` for Release, `com.storytellerf.llmd.alpha`
+for Alpha, `com.storytellerf.llmd.debug` for Debug, and `com.storytellerf.llmd.e2e` for E2E. The
+exported component classes and intent actions retain the base `com.storytellerf.llmd` namespace
+across all variants.
 
 ## End-to-end import check
 
-`scripts/test-android-appium.sh` builds and installs the selected Android variant, pushes the
-model to Downloads, and imports it through the system document picker. The test passes only after
-the UI's native bridge reports that the model was imported.
+`scripts/test-android-appium.sh` builds and installs the selected llmd variant, pushes the model
+to Downloads, and imports it through the system document picker. It then installs the independent
+IPC sample, authorizes it, and verifies health, model listing, text chat, and image chat through
+the exported Binder service.
 
 ```bash
 ANDROID_UDID=<device-serial> scripts/test-android-appium.sh
 ```
 
-Use `--e2e` to exercise the minified, debug-signed variant.
+The IPC sample can select the Debug, Release, Alpha, or E2E llmd package at runtime. Use `--e2e`
+to exercise the minified, debug-signed llmd variant.

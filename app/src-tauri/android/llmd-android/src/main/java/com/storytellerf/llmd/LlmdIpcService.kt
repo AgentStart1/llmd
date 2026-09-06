@@ -37,10 +37,6 @@ class LlmdIpcService : Service() {
     override fun onCreate() {
         super.onCreate()
         LlmdAndroidBridge.configure(this)
-        serviceScope.launch {
-            runCatching { LlmdAndroidBridge.initialize(this@LlmdIpcService) }
-                .onFailure { android.util.Log.e("llmd", "LiteRT-LM initialization failed", it) }
-        }
     }
 
     override fun onBind(intent: Intent?): IBinder = binder
@@ -57,6 +53,7 @@ class LlmdIpcService : Service() {
         val callingUid = Binder.getCallingUid()
         serviceScope.launch {
             val response = if (LlmdIpcAuthorization.isAuthorized(this@LlmdIpcService, callingUid)) {
+                LlmdAndroidBridge.initialize(this@LlmdIpcService)
                 buildResponse()
             } else {
                 authorizationRequiredResponse()

@@ -26,10 +26,15 @@ class MainActivity : TauriActivity() {
     }
 
     activityScope.launch {
+      LlmdAndroidBridge.close()
       val result = runCatching {
-        LlmdAndroidBridge.close()
         copyDefaultModel(uri)
         LlmdAndroidBridge.initialize(this@MainActivity)
+      }
+      if (result.isFailure) {
+        // copyDefaultModel preserves the existing destination until the replacement is ready.
+        // Restore the previous engine when a replacement import is rejected or unreadable.
+        runCatching { LlmdAndroidBridge.initialize(this@MainActivity) }
       }
       emitModelMutation(
         status = if (result.isSuccess) "imported" else "error",

@@ -16,9 +16,11 @@ use appium_client::{
 };
 
 const RELEASE_PACKAGE: &str = "com.storytellerf.llmd";
+const ALPHA_PACKAGE: &str = "com.storytellerf.llmd.alpha";
 const DEBUG_PACKAGE: &str = "com.storytellerf.llmd.debug";
+const E2E_PACKAGE: &str = "com.storytellerf.llmd.e2e";
 const MAIN_ACTIVITY: &str = "com.storytellerf.llmd.MainActivity";
-const PROVIDER_SAMPLE_ACTIVITY: &str = "com.storytellerf.llmd.LiteRtProviderSampleActivity";
+const SAMPLE_ACTIVITY: &str = "com.storytellerf.llmd.sample.IpcSampleActivity";
 const DEFAULT_MODEL: &str = "gemma-4-E2B-it";
 
 #[tokio::main]
@@ -37,7 +39,13 @@ async fn main() -> Result<()> {
         let _ = child.wait();
     }
     appium_result?;
-    run_provider_sample(&config)?;
+    let mut appium = ensure_appium(&config)?;
+    let sample_result = run_ipc_sample(&config).await;
+    if let Some(child) = appium.as_mut() {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+    sample_result?;
 
     Ok(())
 }
@@ -49,6 +57,7 @@ struct Config {
     android_build_type: AndroidBuildType,
     android_variant: String,
     android_package: String,
+    sample_package: String,
     model_path: PathBuf,
     device_model_path: String,
     appium_url: String,
@@ -92,6 +101,8 @@ impl Config {
             android_variant,
             android_package: env::var("ANDROID_PACKAGE")
                 .unwrap_or_else(|_| android_build_type.default_package().to_string()),
+            sample_package: env::var("LLMD_SAMPLE_ANDROID_PACKAGE")
+                .unwrap_or_else(|_| "com.storytellerf.llmd.sample.debug".to_string()),
             device_model_path: env::var("LLMD_ANDROID_DEVICE_MODEL_PATH")
                 .unwrap_or_else(|_| format!("/sdcard/Download/{model_file_name}")),
             appium_url: env::var("APPIUM_URL")
@@ -104,6 +115,8 @@ impl Config {
 #[derive(Clone, Copy)]
 enum AndroidBuildType {
     Debug,
+    Release,
+    Alpha,
     E2e,
 }
 
@@ -114,14 +127,20 @@ impl AndroidBuildType {
             .as_str()
         {
             "debug" => Ok(Self::Debug),
+            "release" => Ok(Self::Release),
+            "alpha" => Ok(Self::Alpha),
             "e2e" => Ok(Self::E2e),
-            other => bail!("LLMD_ANDROID_BUILD_TYPE must be debug or e2e, got {other}"),
+            other => {
+                bail!("LLMD_ANDROID_BUILD_TYPE must be debug, release, alpha, or e2e, got {other}")
+            }
         }
     }
 
     fn gradle_suffix(self) -> &'static str {
         match self {
             Self::Debug => "Debug",
+            Self::Release => "Release",
+            Self::Alpha => "Alpha",
             Self::E2e => "E2e",
         }
     }
@@ -129,6 +148,8 @@ impl AndroidBuildType {
     fn gradle_name(self) -> &'static str {
         match self {
             Self::Debug => "debug",
+            Self::Release => "release",
+            Self::Alpha => "alpha",
             Self::E2e => "e2e",
         }
     }
@@ -136,7 +157,9 @@ impl AndroidBuildType {
     fn default_package(self) -> &'static str {
         match self {
             Self::Debug => DEBUG_PACKAGE,
-            Self::E2e => RELEASE_PACKAGE,
+            Self::Release => RELEASE_PACKAGE,
+            Self::Alpha => ALPHA_PACKAGE,
+            Self::E2e => E2E_PACKAGE,
         }
     }
 }
@@ -154,6 +177,7 @@ fn build_and_install_apk(config: &Config) -> Result<()> {
     build_apk(config)?;
 
     let apk = latest_apk(config)?;
+    let sample_apk = build_sample_apk(config)?;
     let _ = command("adb", config)
         .args(["uninstall", &config.android_package])
         .status();
@@ -161,6 +185,14 @@ fn build_and_install_apk(config: &Config) -> Result<()> {
         command("adb", config)
             .args(["install", "-r", "-d"])
             .arg(apk),
+    )?;
+    let _ = command("adb", config)
+        .args(["uninstall", &config.sample_package])
+        .status();
+    run_status(
+        command("adb", config)
+            .args(["install", "-r", "-d"])
+            .arg(sample_apk),
     )
 }
 
@@ -219,6 +251,28 @@ fn latest_apk(config: &Config) -> Result<PathBuf> {
     latest
         .map(|(_, path)| path)
         .ok_or_else(|| anyhow!("no {build_type} APK found under {}", output_dir.display()))
+}
+
+fn build_sample_apk(config: &Config) -> Result<PathBuf> {
+    let gradle_task = ":llmd-sample:assembleDebug";
+    run_status(
+        Command::new("./gradlew")
+            .current_dir(config.root_dir.join("app/src-tauri/gen/android"))
+            .arg(gradle_task)
+            .arg("--no-daemon"),
+    )?;
+    let output_dir = config
+        .root_dir
+        .join("app/src-tauri/android/llmd-sample/build/outputs/apk");
+    let mut latest = None;
+    collect_latest_apk(&output_dir, "debug", &mut latest)?;
+    latest.map(|(_, path)| path).ok_or_else(|| {
+        anyhow!(
+            "no {} sample APK found under {}",
+            "debug",
+            output_dir.display()
+        )
+    })
 }
 
 fn collect_latest_apk(
@@ -298,9 +352,33 @@ async fn import_model_with_appium(config: &Config) -> Result<()> {
     result
 }
 
-fn run_provider_sample(config: &Config) -> Result<()> {
-    let component = format!("{}/{}", config.android_package, PROVIDER_SAMPLE_ACTIVITY);
-    run_status(command("adb", config).args(["shell", "am", "start", "-n", &component]))?;
+async fn run_ipc_sample(config: &Config) -> Result<()> {
+    let component = format!("{}/{}", config.sample_package, SAMPLE_ACTIVITY);
+    run_status(command("adb", config).args([
+        "shell",
+        "am",
+        "start",
+        "-n",
+        &component,
+        "--es",
+        "llmdPackage",
+        &config.android_package,
+    ]))?;
+    let mut capabilities = AndroidCapabilities::new_uiautomator();
+    if let Some(serial) = &config.device_serial {
+        capabilities.udid(serial);
+    }
+    capabilities.app_package(&config.sample_package);
+    capabilities.app_activity(SAMPLE_ACTIVITY);
+    capabilities.set_bool("appium:autoGrantPermissions", true);
+    capabilities.set_bool("appium:noReset", true);
+    let client = ClientBuilder::rustls(capabilities)
+        .connect(&config.appium_url)
+        .await
+        .with_context(|| format!("connect Appium server at {}", config.appium_url))?;
+    let authorization_result = wait_click(&client, text("ALLOW"), Duration::from_secs(60)).await;
+    client.clone().close().await.ok();
+    authorization_result?;
 
     let deadline = std::time::Instant::now() + Duration::from_secs(900);
     while std::time::Instant::now() < deadline {

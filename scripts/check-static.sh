@@ -248,7 +248,10 @@ run_android_kotlin_checks() {
   "${ROOT_DIR}/scripts/sync-tauri-android-overrides.sh"
 
   step "Compiling Android Kotlin and AIDL"
-  (cd "${ROOT_DIR}/app/src-tauri/gen/android" && ./gradlew :app:compileArm64DebugKotlin --no-daemon)
+  (
+    cd "${ROOT_DIR}/app/src-tauri/gen/android" &&
+      ./gradlew :app:compileArm64DebugKotlin :llmd-sample:assembleDebug --no-daemon
+  )
 }
 
 run_android_rust_checks() {

@@ -89,12 +89,6 @@ object LlmdAndroidBridge {
         }
 
         val messages = parseMessages(request.getJSONArray("messages"), callingUid)
-        val imageCount = messages.sumOf { message ->
-            message.content.count { it is LlmdChatContent.Image }
-        }
-        require(imageCount <= MAX_IMAGES_PER_REQUEST) {
-            "A request may contain at most $MAX_IMAGES_PER_REQUEST image"
-        }
         val systemPrompt = messages.firstOrNull { it.role == "system" }?.text ?: ""
         val temperature = when {
             request.isNull("temperature") -> 0.0
@@ -115,11 +109,16 @@ object LlmdAndroidBridge {
         }
     }
 
-    internal fun parseMessages(array: JSONArray, callingUid: Int = android.os.Process.myUid()): List<LlmdChatMessage> =
-        (0 until array.length()).map { index ->
+    internal fun parseMessages(array: JSONArray, callingUid: Int = android.os.Process.myUid()): List<LlmdChatMessage> {
+        var imageCount = 0
+        return (0 until array.length()).map { index ->
             val item = array.getJSONObject(index)
             val role = item.getString("role")
-            val content = parseContent(item.get("content"), callingUid)
+            val content = parseContent(item.get("content"), callingUid) {
+                require(++imageCount <= MAX_IMAGES_PER_REQUEST) {
+                    "A request may contain at most $MAX_IMAGES_PER_REQUEST image"
+                }
+            }
             require(role != "system" || content.none { it is LlmdChatContent.Image }) {
                 "System messages must not contain images"
             }
@@ -128,14 +127,22 @@ object LlmdAndroidBridge {
                 content = content,
             )
         }
+    }
 
-    private fun parseContent(value: Any, callingUid: Int): List<LlmdChatContent> = when (value) {
+    private fun parseContent(
+        value: Any,
+        callingUid: Int,
+        beforeImageRead: () -> Unit,
+    ): List<LlmdChatContent> = when (value) {
         is String -> listOf(LlmdChatContent.Text(value))
         is JSONArray -> (0 until value.length()).map { index ->
             val part = value.getJSONObject(index)
             when (val type = part.getString("type")) {
                 "text" -> LlmdChatContent.Text(part.getString("text"))
-                "image_url" -> parseImageUrl(part.get("image_url"), callingUid)
+                "image_url" -> {
+                    beforeImageRead()
+                    parseImageUrl(part.get("image_url"), callingUid)
+                }
                 else -> throw IllegalArgumentException("Unsupported message content type: $type")
             }
         }
@@ -180,6 +187,12 @@ object LlmdAndroidBridge {
         require(bounds.outWidth > 0 && bounds.outHeight > 0 && bounds.outMimeType == mimeType) {
             "Invalid image data or MIME type mismatch"
         }
+        val pixelCount = bounds.outWidth.toLong() * bounds.outHeight.toLong()
+        require(
+            bounds.outWidth <= MAX_IMAGE_DIMENSION &&
+                bounds.outHeight <= MAX_IMAGE_DIMENSION &&
+                pixelCount <= MAX_IMAGE_PIXELS,
+        ) { "Image dimensions exceed the ${MAX_IMAGE_PIXELS}-pixel limit" }
         return LlmdChatContent.Image(bytes, requireNotNull(mimeType))
     }
 
@@ -192,5 +205,7 @@ object LlmdAndroidBridge {
     private const val DEFAULT_MODEL_FILE_NAME = "$DEFAULT_MODEL.litertlm"
     private const val MODEL_DIR = "models"
     private const val MAX_IMAGE_BYTES = 750_000
+    private const val MAX_IMAGE_DIMENSION = 4_096
+    private const val MAX_IMAGE_PIXELS = 4_000_000L
     private val SUPPORTED_IMAGE_MIME_TYPES = setOf("image/jpeg", "image/png", "image/webp")
 }

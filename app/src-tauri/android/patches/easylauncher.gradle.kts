@@ -11,10 +11,10 @@ extensions.configure<com.project.starter.easylauncher.plugin.EasyLauncherExtensi
                 ),
             )
         }
-        register("daily") {
+        register("alpha") {
             filters(
                 customRibbon(
-                    label = "DAILY",
+                    label = "ALPHA",
                     ribbonColor = "#6A1B9A",
                     labelColor = "#FFFFFF",
                 ),
