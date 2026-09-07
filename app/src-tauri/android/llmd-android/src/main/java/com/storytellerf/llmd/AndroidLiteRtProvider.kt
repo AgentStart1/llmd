@@ -103,15 +103,21 @@ class AndroidLiteRtProvider(
             true
         } catch (error: CancellationException) {
             throw error
+        } catch (error: LinkageError) {
+            initializationFailed(error)
         } catch (error: Exception) {
-            if (!closed) {
-                initializationState = InitializationState.ERROR
-                initializationError = error.message ?: error::class.java.simpleName
-                log("LiteRT-LM initialization failed: $initializationError")
-            }
-            commands.close(error)
-            false
+            initializationFailed(error)
         }
+    }
+
+    private fun initializationFailed(error: Throwable): Boolean {
+        if (!closed) {
+            initializationState = InitializationState.ERROR
+            initializationError = error.message ?: error::class.java.simpleName
+            log("LiteRT-LM initialization failed: $initializationError")
+        }
+        commands.close(error)
+        return false
     }
 
     suspend fun close() {
