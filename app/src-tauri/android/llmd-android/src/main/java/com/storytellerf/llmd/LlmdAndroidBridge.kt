@@ -6,8 +6,10 @@ import android.net.Uri
 import java.io.ByteArrayOutputStream
 import java.io.File
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -36,6 +38,24 @@ object LlmdAndroidBridge {
     suspend fun close() = providerMutex.withLock {
         provider?.close()
         provider = null
+    }
+
+    /** Replaces the model without allowing a concurrent IPC request to start a stale provider. */
+    suspend fun replaceDefaultModel(context: Context, source: Uri) = providerMutex.withLock {
+        configure(context)
+        provider?.close()
+        provider = null
+        try {
+            copyDefaultModel(context, source)
+            provider = createProvider(context)
+        } catch (error: Throwable) {
+            // The existing destination is preserved until the replacement is ready. Restore its
+            // engine when importing the new file fails.
+            if (File(selectedModelPath).isUsableModelFile()) {
+                provider = createProvider(context)
+            }
+            throw error
+        }
     }
 
     suspend fun listModels(): List<String> = providerMutex.withLock { listModelsSync() }
@@ -84,28 +104,58 @@ object LlmdAndroidBridge {
         val request = JSONObject(requestJson)
         val model = request.optString("model", DEFAULT_MODEL)
         require(model == DEFAULT_MODEL) { "Unsupported model: $model" }
-        require(File(selectedModelPath).isUsableModelFile()) {
-            "Model file does not exist: $selectedModelPath"
+        val (activeProvider, reservation) = providerMutex.withLock {
+            require(File(selectedModelPath).isUsableModelFile()) {
+                "Model file does not exist: $selectedModelPath"
+            }
+            val currentProvider = requireNotNull(provider) { "Android LiteRT bridge is not initialized" }
+            currentProvider.tryReserveRequest()
+                ?.let { currentProvider to it }
+                ?: error("LiteRT-LM request queue is full or the engine is not ready")
         }
 
-        val messages = parseMessages(request.getJSONArray("messages"), callingUid)
-        val systemPrompt = messages.firstOrNull { it.role == "system" }?.text ?: ""
-        val temperature = when {
-            request.isNull("temperature") -> 0.0
-            else -> request.optDouble("temperature", 0.0)
-        }
-        val activeProvider = requireNotNull(provider) { "Android LiteRT bridge is not initialized" }
-
-        val task = activeProvider.generate(
-            systemPrompt = systemPrompt,
-            messages = messages,
-            temperature = temperature,
-        )
         return try {
+            val messages = parseMessages(request.getJSONArray("messages"), callingUid)
+            val systemPrompt = messages.firstOrNull { it.role == "system" }?.text ?: ""
+            val temperature = when {
+                request.isNull("temperature") -> 0.0
+                else -> request.optDouble("temperature", 0.0)
+            }
+            val task = activeProvider.generate(
+                systemPrompt = systemPrompt,
+                messages = messages,
+                temperature = temperature,
+                reservation = reservation,
+            )
             task.await()
         } catch (error: CancellationException) {
-            task.cancel(error)
             throw error
+        } finally {
+            reservation.release()
+        }
+    }
+
+    private fun createProvider(context: Context): AndroidLiteRtProvider = AndroidLiteRtProvider(
+        modelPath = selectedModelPath,
+        cacheDir = context.applicationContext.cacheDir.absolutePath,
+    ) { android.util.Log.i("llmd", it) }
+
+    private suspend fun copyDefaultModel(context: Context, source: Uri): File = withContext(Dispatchers.IO) {
+        val destination = defaultModelFile(context)
+        val destinationDir = requireNotNull(destination.parentFile) { "Model directory is unavailable" }
+        val temp = File(destinationDir, "${destination.name}.tmp")
+        destinationDir.mkdirs()
+        try {
+            context.contentResolver.openInputStream(source).use { input ->
+                requireNotNull(input) { "Unable to open selected model file" }
+                temp.outputStream().use { output -> input.copyTo(output) }
+            }
+            require(temp.length() > 0L) { "Selected model file is empty" }
+            if (destination.exists()) destination.delete()
+            require(temp.renameTo(destination)) { "Unable to save imported model" }
+            destination
+        } finally {
+            if (temp.exists()) temp.delete()
         }
     }
 

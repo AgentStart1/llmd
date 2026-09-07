@@ -14,6 +14,7 @@ use appium_client::{
     wait::AppiumWait,
     ClientBuilder,
 };
+use fantoccini::actions::{InputSource, PointerAction, TouchActions, MOUSE_BUTTON_LEFT};
 
 const RELEASE_PACKAGE: &str = "com.storytellerf.llmd";
 const ALPHA_PACKAGE: &str = "com.storytellerf.llmd.alpha";
@@ -165,14 +166,7 @@ impl AndroidBuildType {
 }
 
 fn build_and_install_apk(config: &Config) -> Result<()> {
-    run_status(
-        Command::new(
-            config
-                .root_dir
-                .join("scripts/sync-tauri-android-overrides.sh"),
-        )
-        .current_dir(&config.root_dir),
-    )?;
+    run_status(&mut sync_android_overrides(config))?;
 
     build_apk(config)?;
 
@@ -204,24 +198,16 @@ fn build_apk(config: &Config) -> Result<()> {
     args.extend(["--target", tauri_target(&config.android_target), "--ci"]);
 
     run_status(
-        Command::new("npx")
+        Command::new(if cfg!(windows) { "npx.cmd" } else { "npx" })
             .current_dir(config.root_dir.join("app"))
             .args(args),
     )?;
-    run_status(
-        Command::new(
-            config
-                .root_dir
-                .join("scripts/sync-tauri-android-overrides.sh"),
-        )
-        .current_dir(&config.root_dir),
-    )?;
+    run_status(&mut sync_android_overrides(config))?;
 
     let gradle_task = format!(":app:assemble{}", config.android_variant);
     let rust_build_task = format!(":app:rustBuild{}", config.android_variant);
     run_status(
-        Command::new("./gradlew")
-            .current_dir(config.root_dir.join("app/src-tauri/gen/android"))
+        gradle_command(config)
             .arg(gradle_task)
             .arg(format!(
                 "-PtargetList={}",
@@ -255,12 +241,7 @@ fn latest_apk(config: &Config) -> Result<PathBuf> {
 
 fn build_sample_apk(config: &Config) -> Result<PathBuf> {
     let gradle_task = ":llmd-sample:assembleDebug";
-    run_status(
-        Command::new("./gradlew")
-            .current_dir(config.root_dir.join("app/src-tauri/gen/android"))
-            .arg(gradle_task)
-            .arg("--no-daemon"),
-    )?;
+    run_status(gradle_command(config).arg(gradle_task).arg("--no-daemon"))?;
     let output_dir = config
         .root_dir
         .join("app/src-tauri/android/llmd-sample/build/outputs/apk");
@@ -311,6 +292,14 @@ fn collect_latest_apk(
 }
 
 fn push_model_to_downloads(config: &Config) -> Result<()> {
+    if device_file_exists(config, &config.device_model_path)? {
+        println!(
+            "Model already exists on device: {}",
+            config.device_model_path
+        );
+        return Ok(());
+    }
+
     let parent = Path::new(&config.device_model_path)
         .parent()
         .and_then(|value| value.to_str())
@@ -322,6 +311,14 @@ fn push_model_to_downloads(config: &Config) -> Result<()> {
             .arg(&config.model_path)
             .arg(&config.device_model_path),
     )
+}
+
+fn device_file_exists(config: &Config, path: &str) -> Result<bool> {
+    let status = command("adb", config)
+        .args(["shell", "test", "-f", path])
+        .status()
+        .with_context(|| format!("check model on device: {path}"))?;
+    Ok(status.success())
 }
 
 async fn import_model_with_appium(config: &Config) -> Result<()> {
@@ -413,39 +410,102 @@ async fn select_model_in_picker(
         .unwrap_or(DEFAULT_MODEL);
     let model_without_extension = model_name.trim_end_matches(".litertlm");
 
-    if try_click(client, contains_text(model_name), Duration::from_secs(10)).await? {
+    ensure_downloads_directory(client).await?;
+
+    for _ in 0..20 {
+        if try_click(
+            client,
+            contains_text(model_name),
+            Duration::from_millis(500),
+        )
+        .await?
+            || try_click(
+                client,
+                contains_text(model_without_extension),
+                Duration::from_millis(500),
+            )
+            .await?
+        {
+            return Ok(());
+        }
+        scroll_picker_down(client).await?;
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+
+    bail!("unable to select {model_name} in Android document picker")
+}
+
+async fn ensure_downloads_directory(client: &appium_client::AndroidClient) -> Result<()> {
+    if picker_is_showing_downloads(client).await? {
         return Ok(());
     }
 
-    let _ = try_click(
+    let navigation_opened = try_click(
         client,
         content_desc_contains("Show roots"),
         Duration::from_secs(5),
     )
-    .await?;
-    let _ = try_click(
-        client,
-        content_desc_contains("Open navigation drawer"),
-        Duration::from_secs(5),
-    )
-    .await?;
-    let _ = try_click(client, text("Downloads"), Duration::from_secs(5)).await?;
-    let _ = try_click(client, text("Download"), Duration::from_secs(5)).await?;
-
-    if try_click(client, contains_text(model_name), Duration::from_secs(180)).await? {
-        return Ok(());
-    }
-    if try_click(
-        client,
-        contains_text(model_without_extension),
-        Duration::from_secs(10),
-    )
     .await?
-    {
-        return Ok(());
+        || try_click(
+            client,
+            content_desc_contains("Open navigation drawer"),
+            Duration::from_secs(5),
+        )
+        .await?;
+    if !navigation_opened {
+        bail!("unable to open Android document picker navigation")
     }
 
-    bail!("unable to select {model_name} in Android document picker")
+    wait_click(client, clickable_text("Downloads"), Duration::from_secs(10)).await?;
+    wait_for_picker_downloads(client, Duration::from_secs(10)).await
+}
+
+async fn picker_is_showing_downloads(client: &appium_client::AndroidClient) -> Result<bool> {
+    Ok(client
+        .appium_wait()
+        .at_most(Duration::from_millis(500))
+        .for_element(By::xpath(&documents_ui_downloads_breadcrumb()))
+        .await
+        .is_ok())
+}
+
+async fn wait_for_picker_downloads(
+    client: &appium_client::AndroidClient,
+    timeout: Duration,
+) -> Result<()> {
+    client
+        .appium_wait()
+        .at_most(timeout)
+        .check_every(Duration::from_millis(250))
+        .for_element(By::xpath(&documents_ui_downloads_breadcrumb()))
+        .await?;
+    Ok(())
+}
+
+async fn scroll_picker_down(client: &appium_client::AndroidClient) -> Result<()> {
+    let (width, height) = client.get_window_size().await?;
+    let x = (width / 2) as i64;
+    let from_y = (height as f64 * 0.8) as i64;
+    let to_y = (height as f64 * 0.25) as i64;
+    let gesture = TouchActions::new("picker-scroll".to_string())
+        .then(PointerAction::MoveTo {
+            duration: Some(Duration::ZERO),
+            x,
+            y: from_y,
+        })
+        .then(PointerAction::Down {
+            button: MOUSE_BUTTON_LEFT,
+        })
+        .then(PointerAction::MoveTo {
+            duration: Some(Duration::from_millis(350)),
+            x,
+            y: to_y,
+        })
+        .then(PointerAction::Up {
+            button: MOUSE_BUTTON_LEFT,
+        });
+    client.perform_actions(gesture).await?;
+    Ok(())
 }
 
 async fn wait_click(
@@ -504,12 +564,16 @@ fn ensure_appium(config: &Config) -> Result<Option<Child>> {
         .unwrap_or_else(|| config.root_dir.join("appium.log"));
     let log = std::fs::File::create(&log_path)
         .with_context(|| format!("create Appium log {}", log_path.display()))?;
-    let child = Command::new("appium")
-        .args(["--address", "127.0.0.1", "--port", "4723"])
-        .stdout(Stdio::from(log.try_clone()?))
-        .stderr(Stdio::from(log))
-        .spawn()
-        .context("start Appium server")?;
+    let child = Command::new(if cfg!(windows) {
+        "appium.cmd"
+    } else {
+        "appium"
+    })
+    .args(["--address", "127.0.0.1", "--port", "4723"])
+    .stdout(Stdio::from(log.try_clone()?))
+    .stderr(Stdio::from(log))
+    .spawn()
+    .context("start Appium server")?;
 
     for _ in 0..30 {
         if appium_is_ready(&config.appium_url) {
@@ -549,6 +613,32 @@ fn command(program: &str, config: &Config) -> Command {
             command.args(["-s", serial]);
         }
     }
+    command
+}
+
+fn sync_android_overrides(config: &Config) -> Command {
+    let script = config
+        .root_dir
+        .join("scripts/sync-tauri-android-overrides.sh");
+    let mut command = if cfg!(windows) {
+        let mut command = Command::new("bash");
+        command.arg(script);
+        command
+    } else {
+        Command::new(script)
+    };
+    command.current_dir(&config.root_dir);
+    command
+}
+
+fn gradle_command(config: &Config) -> Command {
+    let android_dir = config.root_dir.join("app/src-tauri/gen/android");
+    let mut command = Command::new(android_dir.join(if cfg!(windows) {
+        "gradlew.bat"
+    } else {
+        "gradlew"
+    }));
+    command.current_dir(android_dir);
     command
 }
 
@@ -601,6 +691,18 @@ fn contains_text(value: &str) -> String {
 
 fn content_desc_contains(value: &str) -> String {
     format!("//*[contains(@content-desc,{})]", xpath_literal(value))
+}
+
+fn clickable_text(value: &str) -> String {
+    format!(
+        "//*[@text={}]/ancestor::*[@clickable='true'][1]",
+        xpath_literal(value)
+    )
+}
+
+fn documents_ui_downloads_breadcrumb() -> String {
+    "//*[@resource-id='com.android.documentsui:id/breadcrumb_text' and @text='Downloads']"
+        .to_string()
 }
 
 fn xpath_literal(value: &str) -> String {

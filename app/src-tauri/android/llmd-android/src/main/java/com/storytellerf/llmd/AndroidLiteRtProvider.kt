@@ -12,6 +12,7 @@ import com.google.ai.edge.litertlm.ExperimentalApi
 import com.google.ai.edge.litertlm.Message
 import com.google.ai.edge.litertlm.SamplerConfig
 import java.io.File
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CompletableDeferred
@@ -41,7 +42,10 @@ class AndroidLiteRtProvider(
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val commands = Channel<Pair<CompletableDeferred<Unit>, Job>>(Channel.UNLIMITED)
+    private val commands = Channel<Pair<CompletableDeferred<Unit>, Job>>(MAX_PENDING_REQUESTS)
+    private val requestSlots = Channel<Unit>(MAX_PENDING_REQUESTS).also { slots ->
+        repeat(MAX_PENDING_REQUESTS) { slots.trySend(Unit) }
+    }
 
     @Volatile
     var initializationState = InitializationState.UNINITIALIZED
@@ -67,6 +71,15 @@ class AndroidLiteRtProvider(
     }
 
     fun isReady(): Boolean = initializationState == InitializationState.INITIALIZED && !closed
+
+    /**
+     * Reserves capacity before a caller reads a request's image payload. The reservation must be
+     * passed to [generate] or released when request parsing fails.
+     */
+    fun tryReserveRequest(): RequestReservation? {
+        if (!isReady() || requestSlots.tryReceive().isFailure) return null
+        return RequestReservation(this)
+    }
 
     private fun <T> enqueue(block: suspend () -> T): Deferred<T> {
         val start = CompletableDeferred<Unit>()
@@ -149,10 +162,40 @@ class AndroidLiteRtProvider(
         messages: List<LlmdChatMessage>,
         temperature: Double,
     ): Deferred<String> {
+        val reservation = requireNotNull(tryReserveRequest()) {
+            "LiteRT-LM request queue is full or the engine is not ready"
+        }
+        return generate(systemPrompt, messages, temperature, reservation)
+    }
+
+    fun generate(
+        systemPrompt: String,
+        messages: List<LlmdChatMessage>,
+        temperature: Double,
+        reservation: RequestReservation,
+    ): Deferred<String> {
+        check(reservation.owner === this) { "LiteRT-LM request reservation belongs to another provider" }
         check(isReady()) { "LiteRT-LM engine is not ready" }
-        return enqueue {
-            check(isReady()) { "LiteRT-LM engine is not ready" }
-            generateLocked(systemPrompt, messages, temperature)
+        return try {
+            enqueue {
+                check(isReady()) { "LiteRT-LM engine is not ready" }
+                generateLocked(systemPrompt, messages, temperature)
+            }.also { task -> task.invokeOnCompletion { reservation.release() } }
+        } catch (error: Throwable) {
+            reservation.release()
+            throw error
+        }
+    }
+
+    class RequestReservation internal constructor(
+        internal val owner: AndroidLiteRtProvider,
+    ) {
+        private val released = AtomicBoolean(false)
+
+        fun release() {
+            if (released.compareAndSet(false, true) && !owner.closed) {
+                owner.requestSlots.trySend(Unit)
+            }
         }
     }
 
@@ -228,6 +271,11 @@ class AndroidLiteRtProvider(
         runCatching { renderMessageIntoString(message) }
             .getOrDefault(message.toString())
             .stripChatTemplateMarkers()
+
+    private companion object {
+        // One request may run while one additional request waits for the serialized GPU engine.
+        const val MAX_PENDING_REQUESTS = 2
+    }
 
 }
 

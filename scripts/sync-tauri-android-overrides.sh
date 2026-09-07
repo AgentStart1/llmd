@@ -103,8 +103,6 @@ fi
 apply_patch_script "${BUILD_FILE}" "${PATCHES_DIR}/transformations/remove-generated-ipc-source-sets.perl"
 apply_patch_script "${BUILD_FILE}" "${PATCHES_DIR}/transformations/remove-litertlm-dependency.perl"
 apply_patch_script "${BUILD_FILE}" "${PATCHES_DIR}/transformations/remove-datastore-dependency.perl"
-apply_patch_script "${BUILD_FILE}" "${PATCHES_DIR}/transformations/rename-daily-build-type.perl"
-
 if ! grep -Fq 'implementation(project(":llmd-android"))' "${BUILD_FILE}"; then
   apply_patch_script "${BUILD_FILE}" "${PATCHES_DIR}/insertion-points/android-dependency.perl"
   apply_template "${BUILD_FILE}" "__LLMD_ANDROID_DEPENDENCY__" "${PATCHES_DIR}/app-dependency.gradle.kts"

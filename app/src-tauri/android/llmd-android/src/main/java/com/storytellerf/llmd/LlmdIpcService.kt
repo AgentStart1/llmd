@@ -127,8 +127,11 @@ class LlmdIpcService : Service() {
                     )
                     .toString()
             }.getOrElse { error ->
-                if (error is CancellationException) throw error
-                errorResponse(error)
+                if (error is CancellationException) {
+                    requestCancelledResponse()
+                } else {
+                    errorResponse(error)
+                }
             }
         }
 
@@ -149,6 +152,16 @@ class LlmdIpcService : Service() {
                 JSONObject()
                     .put("message", "Caller is not authorized to use llmd IPC")
                     .put("type", "authorization_required"),
+            )
+            .toString()
+
+    private fun requestCancelledResponse(): String =
+        JSONObject()
+            .put(
+                "error",
+                JSONObject()
+                    .put("message", "Request cancelled because the model changed")
+                    .put("type", "model_changed"),
             )
             .toString()
 
