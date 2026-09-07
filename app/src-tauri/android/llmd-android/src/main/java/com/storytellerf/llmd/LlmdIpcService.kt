@@ -6,6 +6,7 @@ import android.os.Binder
 import android.os.IBinder
 import com.storytellerf.llmd.ipc.ILlmdChatCallback
 import com.storytellerf.llmd.ipc.ILlmdService
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -28,8 +29,14 @@ class LlmdIpcService : Service() {
         }
 
         override fun chatCompletionAsync(requestJson: String, callback: ILlmdChatCallback) {
-            respondAuthorized(callback) { buildChatCompletionResponse(requestJson) }
+            val callingUid = Binder.getCallingUid()
+            respondAuthorized(callback) { buildChatCompletionResponse(requestJson, callingUid) }
         }
+    }
+
+    override fun onCreate() {
+        super.onCreate()
+        LlmdAndroidBridge.configure(this)
     }
 
     override fun onBind(intent: Intent?): IBinder = binder
@@ -46,6 +53,7 @@ class LlmdIpcService : Service() {
         val callingUid = Binder.getCallingUid()
         serviceScope.launch {
             val response = if (LlmdIpcAuthorization.isAuthorized(this@LlmdIpcService, callingUid)) {
+                LlmdAndroidBridge.initialize(this@LlmdIpcService)
                 buildResponse()
             } else {
                 authorizationRequiredResponse()
@@ -56,9 +64,13 @@ class LlmdIpcService : Service() {
 
     private suspend fun buildHealthResponse(): String =
         withContext(Dispatchers.Default) {
+            val bridgeHealth = JSONObject(LlmdAndroidBridge.healthJson())
             JSONObject()
                 .put("status", "ok")
                 .put("provider", PROVIDER)
+                .put("engineReady", bridgeHealth.getBoolean("engineReady"))
+                .put("engineState", bridgeHealth.getString("engineState"))
+                .put("engineError", bridgeHealth.opt("engineError"))
                 .toString()
         }
 
@@ -83,13 +95,12 @@ class LlmdIpcService : Service() {
                 .toString()
         }
 
-    private suspend fun buildChatCompletionResponse(requestJson: String): String =
+    private suspend fun buildChatCompletionResponse(requestJson: String, callingUid: Int): String =
         withContext(Dispatchers.Default) {
             runCatching {
-                LlmdAndroidBridge.initialize(this@LlmdIpcService)
                 val request = JSONObject(requestJson)
                 val model = request.optString("model", DEFAULT_MODEL)
-                val content = LlmdAndroidBridge.chatCompletion(requestJson)
+                val content = LlmdAndroidBridge.chatCompletion(requestJson, callingUid)
                 JSONObject()
                     .put("id", "chatcmpl-android-ipc")
                     .put("object", "chat.completion")
@@ -119,7 +130,11 @@ class LlmdIpcService : Service() {
                     )
                     .toString()
             }.getOrElse { error ->
-                errorResponse(error)
+                if (error is CancellationException) {
+                    requestCancelledResponse()
+                } else {
+                    errorResponse(error)
+                }
             }
         }
 
@@ -140,6 +155,16 @@ class LlmdIpcService : Service() {
                 JSONObject()
                     .put("message", "Caller is not authorized to use llmd IPC")
                     .put("type", "authorization_required"),
+            )
+            .toString()
+
+    private fun requestCancelledResponse(): String =
+        JSONObject()
+            .put(
+                "error",
+                JSONObject()
+                    .put("message", "Request cancelled because the model changed")
+                    .put("type", "model_changed"),
             )
             .toString()
 

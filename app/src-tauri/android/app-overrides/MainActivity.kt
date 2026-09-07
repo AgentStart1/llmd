@@ -1,32 +1,40 @@
 package com.storytellerf.llmd
 
+import android.content.Context
+import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.provider.DocumentsContract
+import android.provider.OpenableColumns
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.enableEdgeToEdge
 import androidx.core.view.WindowInsetsControllerCompat
-import java.io.File
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
 class MainActivity : TauriActivity() {
   private val activityScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
   private var webView: WebView? = null
-  private val importModel = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+  private val importModel = registerForActivityResult(object : ActivityResultContracts.OpenDocument() {
+    override fun createIntent(context: Context, input: Array<String>): Intent =
+      super.createIntent(context, input).putExtra(DocumentsContract.EXTRA_INITIAL_URI, DOWNLOADS_URI)
+  }) { uri ->
     if (uri == null) {
       emitModelMutation("cancelled")
       return@registerForActivityResult
     }
 
     activityScope.launch {
-      val result = runCatching { copyDefaultModel(uri) }
+      val result = runCatching {
+        require(isLiteRtModelFile(uri)) { "Select a .litertlm model file" }
+        LlmdAndroidBridge.replaceDefaultModel(this@MainActivity, uri)
+      }
       emitModelMutation(
         status = if (result.isSuccess) "imported" else "error",
         error = result.exceptionOrNull()?.message,
@@ -59,25 +67,6 @@ class MainActivity : TauriActivity() {
     super.onDestroy()
   }
 
-  private suspend fun copyDefaultModel(uri: Uri): File = withContext(Dispatchers.IO) {
-    val destination = LlmdAndroidBridge.defaultModelFile(this@MainActivity)
-    val destinationDir = requireNotNull(destination.parentFile) { "Model directory is unavailable" }
-    val temp = File(destinationDir, "${destination.name}.tmp")
-    destinationDir.mkdirs()
-
-    contentResolver.openInputStream(uri).use { input ->
-      requireNotNull(input) { "Unable to open selected model file" }
-      temp.outputStream().use { output ->
-        input.copyTo(output)
-      }
-    }
-
-    require(temp.length() > 0L) { "Selected model file is empty" }
-    if (destination.exists()) destination.delete()
-    require(temp.renameTo(destination)) { "Unable to save imported model" }
-    destination
-  }
-
   private fun emitModelMutation(status: String, error: String? = null) {
     val detail = JSONObject(LlmdAndroidBridge.modelStateJson())
       .put("status", status)
@@ -87,6 +76,20 @@ class MainActivity : TauriActivity() {
     webView?.post { webView?.evaluateJavascript(script, null) }
   }
 
+  private fun isLiteRtModelFile(uri: Uri): Boolean {
+    val displayName = contentResolver.query(
+      uri,
+      arrayOf(OpenableColumns.DISPLAY_NAME),
+      null,
+      null,
+      null,
+    )?.use { cursor ->
+      if (!cursor.moveToFirst()) return@use null
+      cursor.getString(cursor.getColumnIndexOrThrow(OpenableColumns.DISPLAY_NAME))
+    }
+    return displayName?.endsWith(MODEL_FILE_EXTENSION, ignoreCase = true) == true
+  }
+
   inner class ModelImportBridge {
     @JavascriptInterface
     fun importDefaultModel() {
@@ -94,8 +97,6 @@ class MainActivity : TauriActivity() {
         importModel.launch(
           arrayOf(
             "application/octet-stream",
-            "application/vnd.litertlm",
-            "*/*",
           ),
         )
       }
@@ -117,5 +118,12 @@ class MainActivity : TauriActivity() {
 
     @JavascriptInterface
     fun getHealthState(): String = LlmdAndroidBridge.healthJson()
+  }
+
+  private companion object {
+    const val MODEL_FILE_EXTENSION = ".litertlm"
+    val DOWNLOADS_URI: Uri = Uri.parse(
+      "content://com.android.externalstorage.documents/document/primary%3ADownload",
+    )
   }
 }

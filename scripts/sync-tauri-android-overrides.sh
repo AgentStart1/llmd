@@ -6,6 +6,7 @@ ANDROID_ROOT_DIR="${ROOT_DIR}/app/src-tauri/gen/android"
 ANDROID_APP_DIR="${ANDROID_ROOT_DIR}/app"
 ANDROID_LIBRARY_DIR="${ROOT_DIR}/app/src-tauri/android/llmd-android"
 MAIN_ACTIVITY_OVERRIDE="${ROOT_DIR}/app/src-tauri/android/app-overrides/MainActivity.kt"
+SAMPLE_APP_DIR="${ROOT_DIR}/app/src-tauri/android/llmd-sample"
 PATCHES_DIR="${ROOT_DIR}/app/src-tauri/android/patches"
 SETTINGS_FILE="${ANDROID_ROOT_DIR}/settings.gradle"
 ROOT_BUILD_FILE="${ANDROID_ROOT_DIR}/build.gradle.kts"
@@ -60,9 +61,19 @@ if [[ ! -d "${ANDROID_LIBRARY_DIR}" ]]; then
   exit 1
 fi
 
+if [[ ! -d "${SAMPLE_APP_DIR}" ]]; then
+  echo "Missing Android IPC sample app: ${SAMPLE_APP_DIR}" >&2
+  exit 1
+fi
+
 if ! grep -Eq "include [\"']:llmd-android[\"']" "${SETTINGS_FILE}"; then
   printf '\n__LLMD_ANDROID_SETTINGS__\n' >>"${SETTINGS_FILE}"
   apply_template "${SETTINGS_FILE}" "__LLMD_ANDROID_SETTINGS__" "${PATCHES_DIR}/settings.gradle"
+fi
+
+if ! grep -Eq "include [\"']:llmd-sample[\"']" "${SETTINGS_FILE}"; then
+  printf '\n__LLMD_SAMPLE_SETTINGS__\n' >>"${SETTINGS_FILE}"
+  apply_template "${SETTINGS_FILE}" "__LLMD_SAMPLE_SETTINGS__" "${PATCHES_DIR}/sample-settings.gradle"
 fi
 
 if ! grep -Fq 'namespace = "com.storytellerf.llmd"' "${BUILD_FILE}"; then
@@ -92,7 +103,6 @@ fi
 apply_patch_script "${BUILD_FILE}" "${PATCHES_DIR}/transformations/remove-generated-ipc-source-sets.perl"
 apply_patch_script "${BUILD_FILE}" "${PATCHES_DIR}/transformations/remove-litertlm-dependency.perl"
 apply_patch_script "${BUILD_FILE}" "${PATCHES_DIR}/transformations/remove-datastore-dependency.perl"
-
 if ! grep -Fq 'implementation(project(":llmd-android"))' "${BUILD_FILE}"; then
   apply_patch_script "${BUILD_FILE}" "${PATCHES_DIR}/insertion-points/android-dependency.perl"
   apply_template "${BUILD_FILE}" "__LLMD_ANDROID_DEPENDENCY__" "${PATCHES_DIR}/app-dependency.gradle.kts"
@@ -103,11 +113,11 @@ if ! grep -Fq 'storyteller_f_sign_key' "${BUILD_FILE}"; then
   apply_template "${BUILD_FILE}" "__LLMD_ANDROID_SIGNING__" "${PATCHES_DIR}/signing.gradle.kts"
 fi
 
-if ! grep -Fq 'create("daily")' "${BUILD_FILE}" && ! grep -Fq 'create("e2e")' "${BUILD_FILE}"; then
+if ! grep -Fq 'create("alpha")' "${BUILD_FILE}" && ! grep -Fq 'create("e2e")' "${BUILD_FILE}"; then
   apply_patch_script "${BUILD_FILE}" "${PATCHES_DIR}/insertion-points/custom-build-types.perl"
   apply_template "${BUILD_FILE}" "__LLMD_ANDROID_BUILD_TYPES__" "${PATCHES_DIR}/build-types.gradle.kts"
-elif ! grep -Fq 'create("daily")' "${BUILD_FILE}" || ! grep -Fq 'create("e2e")' "${BUILD_FILE}"; then
-  echo "Generated Android project contains only one llmd custom build type." >&2
+elif ! grep -Fq 'create("alpha")' "${BUILD_FILE}" || ! grep -Fq 'create("e2e")' "${BUILD_FILE}"; then
+  echo "Generated Android project does not contain all llmd custom build types." >&2
   echo "Regenerate the Android project before rerunning this script." >&2
   exit 1
 fi

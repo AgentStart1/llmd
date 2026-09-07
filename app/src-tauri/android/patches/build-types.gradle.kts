@@ -1,14 +1,16 @@
         getByName("release") {
             signingConfigs.findByName("release")?.let { signingConfig = it }
         }
-        create("daily") {
+        create("alpha") {
             initWith(getByName("release"))
-            applicationIdSuffix = ".daily"
-            versionNameSuffix = "-daily"
+            applicationIdSuffix = ".alpha"
+            versionNameSuffix = "-alpha"
             matchingFallbacks += listOf("release")
         }
         create("e2e") {
             initWith(getByName("release"))
+            applicationIdSuffix = ".e2e"
+            versionNameSuffix = "-e2e"
             isDebuggable = false
             isJniDebuggable = false
             signingConfig = signingConfigs.getByName("debug")
