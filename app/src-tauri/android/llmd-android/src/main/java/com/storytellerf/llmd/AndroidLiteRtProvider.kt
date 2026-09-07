@@ -52,6 +52,10 @@ class AndroidLiteRtProvider(
         private set
 
     @Volatile
+    var initializationError: String? = null
+        private set
+
+    @Volatile
     private var closed = false
     private var loadedModelPath: String? = null
     private var engine: Engine? = null
@@ -93,6 +97,7 @@ class AndroidLiteRtProvider(
 
     private fun initializeEngine(): Boolean {
         initializationState = InitializationState.INITIALIZING
+        initializationError = null
         return try {
             initializeEngineLocked()
             true
@@ -101,7 +106,8 @@ class AndroidLiteRtProvider(
         } catch (error: Exception) {
             if (!closed) {
                 initializationState = InitializationState.ERROR
-                log("LiteRT-LM initialization failed: ${error.message ?: error::class.java.simpleName}")
+                initializationError = error.message ?: error::class.java.simpleName
+                log("LiteRT-LM initialization failed: $initializationError")
             }
             commands.close(error)
             false

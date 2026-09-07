@@ -92,6 +92,7 @@ object LlmdAndroidBridge {
             "engineState",
             provider?.initializationState?.name?.lowercase() ?: "uninitialized",
         )
+        .put("engineError", provider?.initializationError)
         .toString()
 
     private fun listModelsSync(): List<String> =

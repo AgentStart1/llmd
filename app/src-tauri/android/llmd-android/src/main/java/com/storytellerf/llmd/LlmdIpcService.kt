@@ -64,10 +64,13 @@ class LlmdIpcService : Service() {
 
     private suspend fun buildHealthResponse(): String =
         withContext(Dispatchers.Default) {
+            val bridgeHealth = JSONObject(LlmdAndroidBridge.healthJson())
             JSONObject()
                 .put("status", "ok")
                 .put("provider", PROVIDER)
-                .put("engineReady", JSONObject(LlmdAndroidBridge.healthJson()).getBoolean("engineReady"))
+                .put("engineReady", bridgeHealth.getBoolean("engineReady"))
+                .put("engineState", bridgeHealth.getString("engineState"))
+                .put("engineError", bridgeHealth.opt("engineError"))
                 .toString()
         }
 

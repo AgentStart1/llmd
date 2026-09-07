@@ -128,6 +128,9 @@ class IpcSampleActivity : ComponentActivity() {
                 val health = call { callback -> activeService.healthAsync(callback) }
                 check(health.errorType() == null) { health.errorMessage() }
                 if (health.optBoolean("engineReady")) break
+                check(health.optString("engineState") != "error") {
+                    health.optString("engineError", "LiteRT-LM initialization failed")
+                }
                 delay(500)
             }
         }

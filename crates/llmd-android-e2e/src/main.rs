@@ -292,9 +292,12 @@ fn collect_latest_apk(
 }
 
 fn push_model_to_downloads(config: &Config) -> Result<()> {
-    if device_file_exists(config, &config.device_model_path)? {
+    let local_size = fs::metadata(&config.model_path)
+        .with_context(|| format!("read local model metadata: {}", config.model_path.display()))?
+        .len();
+    if device_file_size(config, &config.device_model_path)? == Some(local_size) {
         println!(
-            "Model already exists on device: {}",
+            "Model already exists on device with matching size: {}",
             config.device_model_path
         );
         return Ok(());
@@ -313,12 +316,20 @@ fn push_model_to_downloads(config: &Config) -> Result<()> {
     )
 }
 
-fn device_file_exists(config: &Config, path: &str) -> Result<bool> {
-    let status = command("adb", config)
-        .args(["shell", "test", "-f", path])
-        .status()
+fn device_file_size(config: &Config, path: &str) -> Result<Option<u64>> {
+    let output = command("adb", config)
+        .args(["exec-out", "stat", "-c", "%s", path])
+        .output()
         .with_context(|| format!("check model on device: {path}"))?;
-    Ok(status.success())
+    if !output.status.success() {
+        return Ok(None);
+    }
+    let size = String::from_utf8(output.stdout)
+        .context("read device model size")?
+        .trim()
+        .parse()
+        .with_context(|| format!("parse device model size: {path}"))?;
+    Ok(Some(size))
 }
 
 async fn import_model_with_appium(config: &Config) -> Result<()> {
