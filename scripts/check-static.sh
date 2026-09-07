@@ -89,41 +89,158 @@ run_host_checks() {
 }
 
 android_ndk_home() {
+  local sdk_root
+
   if [[ -n "${ANDROID_NDK_HOME:-}" ]]; then
-    echo "${ANDROID_NDK_HOME}"
-  elif [[ -n "${ANDROID_NDK:-}" ]]; then
-    echo "${ANDROID_NDK}"
-  elif [[ -n "${ANDROID_NDK_ROOT:-}" ]]; then
-    echo "${ANDROID_NDK_ROOT}"
-  elif [[ -n "${ANDROID_HOME:-}" && -d "${ANDROID_HOME}/ndk" ]]; then
-    find "${ANDROID_HOME}/ndk" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1
-  elif [[ -n "${ANDROID_SDK_ROOT:-}" && -d "${ANDROID_SDK_ROOT}/ndk" ]]; then
-    find "${ANDROID_SDK_ROOT}/ndk" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1
-  elif [[ -d "/usr/local/lib/android/sdk/ndk" ]]; then
+    normalize_shell_path "${ANDROID_NDK_HOME}"
+    return
+  fi
+  if [[ -n "${ANDROID_NDK:-}" ]]; then
+    normalize_shell_path "${ANDROID_NDK}"
+    return
+  fi
+  if [[ -n "${ANDROID_NDK_ROOT:-}" ]]; then
+    normalize_shell_path "${ANDROID_NDK_ROOT}"
+    return
+  fi
+  if [[ -n "${ANDROID_HOME:-}" ]]; then
+    sdk_root="$(normalize_shell_path "${ANDROID_HOME}")"
+    if [[ -d "${sdk_root}/ndk" ]]; then
+      find "${sdk_root}/ndk" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1
+      return
+    fi
+  fi
+  if [[ -n "${ANDROID_SDK_ROOT:-}" ]]; then
+    sdk_root="$(normalize_shell_path "${ANDROID_SDK_ROOT}")"
+    if [[ -d "${sdk_root}/ndk" ]]; then
+      find "${sdk_root}/ndk" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1
+      return
+    fi
+  fi
+  if [[ -d "/usr/local/lib/android/sdk/ndk" ]]; then
     find "/usr/local/lib/android/sdk/ndk" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1
-  elif [[ -d "${HOME}/Android/Sdk/ndk" ]]; then
+    return
+  fi
+  if [[ -d "${HOME}/Android/Sdk/ndk" ]]; then
     find "${HOME}/Android/Sdk/ndk" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1
   fi
 }
 
+android_host_family() {
+  case "$(uname -s)" in
+    Linux*) echo "linux" ;;
+    Darwin*) echo "darwin" ;;
+    MINGW* | MSYS* | CYGWIN*) echo "windows" ;;
+    *)
+      echo "Unsupported Android NDK host: $(uname -s)" >&2
+      return 1
+      ;;
+  esac
+}
+
+normalize_shell_path() {
+  local path="$1"
+
+  if [[ "$(android_host_family)" == "windows" ]] && command -v cygpath >/dev/null 2>&1; then
+    cygpath -u "${path}"
+  else
+    echo "${path}"
+  fi
+}
+
+android_ndk_toolchain_bin() {
+  local ndk_home="$1"
+  local host_family prebuilt_root host_pattern
+  local -a host_directories
+
+  host_family="$(android_host_family)"
+  prebuilt_root="${ndk_home}/toolchains/llvm/prebuilt"
+  if [[ ! -d "${prebuilt_root}" ]]; then
+    echo "Missing Android NDK prebuilt directory: ${prebuilt_root}" >&2
+    return 1
+  fi
+
+  if [[ -n "${ANDROID_NDK_HOST_TAG:-}" ]]; then
+    host_directories=("${prebuilt_root}/${ANDROID_NDK_HOST_TAG}")
+  else
+    host_pattern="${host_family}-*"
+    shopt -s nullglob
+    host_directories=("${prebuilt_root}"/${host_pattern})
+    shopt -u nullglob
+  fi
+
+  if [[ "${#host_directories[@]}" -ne 1 || ! -d "${host_directories[0]}" ]]; then
+    echo "Expected exactly one ${host_family} Android NDK toolchain under ${prebuilt_root}." >&2
+    echo "Set ANDROID_NDK_HOST_TAG to select an explicit NDK host directory." >&2
+    return 1
+  fi
+
+  echo "${host_directories[0]}/bin"
+}
+
+android_ndk_tool() {
+  local toolchain="$1"
+  local tool_name="$2"
+  local host_family candidate
+  local -a suffixes
+
+  host_family="$(android_host_family)"
+  if [[ "${host_family}" == "windows" ]]; then
+    suffixes=(".cmd" ".exe" "")
+  else
+    suffixes=("")
+  fi
+
+  for suffix in "${suffixes[@]}"; do
+    candidate="${toolchain}/${tool_name}${suffix}"
+    if [[ -f "${candidate}" && ("${host_family}" == "windows" || -x "${candidate}") ]]; then
+      if [[ "${host_family}" == "windows" ]] && command -v cygpath >/dev/null 2>&1; then
+        cygpath -w "${candidate}"
+      else
+        echo "${candidate}"
+      fi
+      return 0
+    fi
+  done
+
+  echo "Missing Android NDK tool ${tool_name} under ${toolchain}" >&2
+  return 1
+}
+
 configure_android_rust_toolchain() {
-  local ndk_home toolchain
+  local ndk_home toolchain compiler_prefix target_env
+  local cc_path cxx_path ar_path cc_variable cxx_variable ar_variable
   ndk_home="$(android_ndk_home)"
   if [[ -z "${ndk_home}" ]]; then
     echo "ANDROID_NDK_HOME, ANDROID_NDK, ANDROID_NDK_ROOT, or an SDK ndk directory must be available for Android Rust checks." >&2
     exit 1
   fi
 
-  toolchain="${ndk_home}/toolchains/llvm/prebuilt/linux-x86_64/bin"
+  case "${ANDROID_TARGET}" in
+    aarch64-linux-android) compiler_prefix="aarch64-linux-android" ;;
+    armv7-linux-androideabi) compiler_prefix="armv7a-linux-androideabi" ;;
+    i686-linux-android) compiler_prefix="i686-linux-android" ;;
+    x86_64-linux-android) compiler_prefix="x86_64-linux-android" ;;
+    *)
+      echo "Unsupported Android Rust target: ${ANDROID_TARGET}" >&2
+      exit 1
+      ;;
+  esac
 
-  if [[ ! -x "${toolchain}/aarch64-linux-android${ANDROID_API_LEVEL}-clang" ]]; then
-    echo "Missing Android clang at ${toolchain}/aarch64-linux-android${ANDROID_API_LEVEL}-clang" >&2
-    exit 1
-  fi
+  toolchain="$(android_ndk_toolchain_bin "${ndk_home}")"
+  cc_path="$(android_ndk_tool "${toolchain}" "${compiler_prefix}${ANDROID_API_LEVEL}-clang")"
+  cxx_path="$(android_ndk_tool "${toolchain}" "${compiler_prefix}${ANDROID_API_LEVEL}-clang++")"
+  ar_path="$(android_ndk_tool "${toolchain}" "llvm-ar")"
 
-  export CC_aarch64_linux_android="${CC_aarch64_linux_android:-${toolchain}/aarch64-linux-android${ANDROID_API_LEVEL}-clang}"
-  export CXX_aarch64_linux_android="${CXX_aarch64_linux_android:-${toolchain}/aarch64-linux-android${ANDROID_API_LEVEL}-clang++}"
-  export AR_aarch64_linux_android="${AR_aarch64_linux_android:-${toolchain}/llvm-ar}"
+  target_env="${ANDROID_TARGET//-/_}"
+  cc_variable="CC_${target_env}"
+  cxx_variable="CXX_${target_env}"
+  ar_variable="AR_${target_env}"
+  export "${cc_variable}=${!cc_variable:-${cc_path}}"
+  export "${cxx_variable}=${!cxx_variable:-${cxx_path}}"
+  export "${ar_variable}=${!ar_variable:-${ar_path}}"
+
+  echo "Using Android NDK toolchain: ${toolchain}"
 }
 
 run_android_kotlin_checks() {
@@ -131,7 +248,10 @@ run_android_kotlin_checks() {
   "${ROOT_DIR}/scripts/sync-tauri-android-overrides.sh"
 
   step "Compiling Android Kotlin and AIDL"
-  (cd "${ROOT_DIR}/app/src-tauri/gen/android" && ./gradlew :app:compileArm64DebugKotlin --no-daemon)
+  (
+    cd "${ROOT_DIR}/app/src-tauri/gen/android" &&
+      ./gradlew :app:compileArm64DebugKotlin :llmd-sample:assembleDebug --no-daemon
+  )
 }
 
 run_android_rust_checks() {

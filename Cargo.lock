@@ -1315,6 +1315,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "appium-client",
+ "fantoccini",
  "openssl",
  "serde_json",
  "tokio",
