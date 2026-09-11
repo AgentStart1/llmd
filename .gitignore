@@ -7,5 +7,6 @@
 /app/src-tauri/gen/schemas/
 *.log
 /models/**/*.litertlm
+*.xnnpack_cache
 /build/
 /.gradle/

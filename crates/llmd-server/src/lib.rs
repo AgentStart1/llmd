@@ -7,7 +7,7 @@ use axum::{
     Json, Router,
 };
 use futures_util::{stream as futures_stream, StreamExt};
-use llmd_core::{ChatMessage, ChatRequest, LlmdError, ModelProvider};
+use llmd_core::{ChatMessage, ChatRequest, LlmdError, ModelProvider, ResponseFormat};
 use serde::{Deserialize, Serialize};
 use std::{
     convert::Infallible,
@@ -38,6 +38,7 @@ pub struct OpenAiChatRequest {
     pub stream: bool,
     pub max_tokens: Option<u32>,
     pub temperature: Option<f32>,
+    pub response_format: Option<ResponseFormat>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -84,6 +85,7 @@ impl From<OpenAiChatRequest> for ChatRequest {
             stream: request.stream,
             max_tokens: request.max_tokens,
             temperature: request.temperature,
+            response_format: request.response_format,
         }
     }
 }
@@ -348,7 +350,7 @@ fn now() -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use super::create_router;
+    use super::{create_router, OpenAiChatRequest, ResponseFormat};
     use async_trait::async_trait;
     use axum::{
         body::{to_bytes, Body},
@@ -493,6 +495,41 @@ mod tests {
             body["choices"][0]["message"]["content"],
             "echo: hello\nparts"
         );
+    }
+
+    #[test]
+    fn parses_structured_response_formats() {
+        let json_object: OpenAiChatRequest = serde_json::from_value(serde_json::json!({
+            "model": "fake-model",
+            "messages": [],
+            "response_format": {"type": "json_object"}
+        }))
+        .unwrap();
+        assert!(matches!(
+            json_object.response_format,
+            Some(ResponseFormat::JsonObject)
+        ));
+
+        let json_schema: OpenAiChatRequest = serde_json::from_value(serde_json::json!({
+            "model": "fake-model",
+            "messages": [],
+            "response_format": {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "answer",
+                    "schema": {"type": "object", "properties": {"value": {"type": "string"}}},
+                    "strict": true
+                }
+            }
+        }))
+        .unwrap();
+        let request = ChatRequest::from(json_schema);
+        let Some(ResponseFormat::JsonSchema { json_schema }) = request.response_format else {
+            panic!("schema was lost during conversion");
+        };
+        assert_eq!(json_schema.name, "answer");
+        assert_eq!(json_schema.strict, Some(true));
+        assert_eq!(json_schema.schema["properties"]["value"]["type"], "string");
     }
 
     #[tokio::test]

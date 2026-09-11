@@ -117,16 +117,17 @@ object LlmdAndroidBridge {
 
         return try {
             val messages = parseMessages(request.getJSONArray("messages"), callingUid)
-            val systemPrompt = messages.firstOrNull { it.role == "system" }?.text ?: ""
+            val systemPrompt = messages.filter { it.role == "system" }.map { it.text }
             val temperature = when {
                 request.isNull("temperature") -> 0.0
                 else -> request.optDouble("temperature", 0.0)
             }
             val task = activeProvider.generate(
-                systemPrompt = systemPrompt,
+                systemPrompt = systemPrompt.joinToString("\n\n"),
                 messages = messages,
                 temperature = temperature,
                 reservation = reservation,
+                responseFormat = parseResponseFormat(request),
             )
             task.await()
         } catch (error: CancellationException) {
@@ -198,6 +199,24 @@ object LlmdAndroidBridge {
             }
         }
         else -> throw IllegalArgumentException("Message content must be a string or content array")
+    }
+
+    private fun parseResponseFormat(request: JSONObject): com.google.ai.edge.litertlm.ResponseFormat? {
+        if (!request.has("response_format") || request.isNull("response_format")) return null
+        val responseFormat = request.getJSONObject("response_format")
+        return when (responseFormat.getString("type")) {
+            "text" -> null
+            "json_object" -> {
+                com.google.ai.edge.litertlm.ResponseFormat.json("{\"type\":\"object\"}")
+            }
+            "json_schema" -> {
+                val jsonSchema = responseFormat.getJSONObject("json_schema")
+                jsonSchema.getString("name")
+                val schema = jsonSchema.get("schema")
+                com.google.ai.edge.litertlm.ResponseFormat.json(schema.toString())
+            }
+            else -> throw IllegalArgumentException("Unsupported response_format type")
+        }
     }
 
     private fun parseImageUrl(value: Any, callingUid: Int): LlmdChatContent.Image {

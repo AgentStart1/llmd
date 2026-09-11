@@ -1,141 +1,219 @@
 use async_trait::async_trait;
 use futures_util::StreamExt;
-use litert_lm::LitManager;
-use llmd_core::{
-    messages_to_prompt, ChatRequest, ChatResponse, LlmdError, ModelInfo, ModelProvider, TokenStream,
-};
+use llmd_core::{ChatRequest, ChatResponse, LlmdError, ModelInfo, ModelProvider, TokenStream};
+use std::{path::PathBuf, sync::Arc};
+use tokio::sync::Semaphore;
 
-pub struct RlitertProvider {
-    manager: LitManager,
+#[cfg(not(target_os = "android"))]
+mod native;
+
+pub struct LiteRtProvider {
+    slots: Arc<Semaphore>,
+    #[cfg(not(target_os = "android"))]
+    engines: Arc<native::EngineCache>,
 }
 
-impl RlitertProvider {
+fn backend(error: impl std::fmt::Display) -> LlmdError {
+    LlmdError::Backend(error.to_string())
+}
+
+fn model_dir() -> Result<PathBuf, LlmdError> {
+    if let Some(path) = std::env::var_os("LLMD_MODEL_DIR") {
+        return Ok(PathBuf::from(path));
+    }
+    dirs::data_local_dir()
+        .map(|path| path.join("llmd").join("models"))
+        .ok_or_else(|| backend("Cannot determine model directory; set LLMD_MODEL_DIR"))
+}
+
+fn validate_model_id(model: &str) -> Result<(), LlmdError> {
+    if model.is_empty()
+        || !model
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"-_.".contains(&b))
+        || model == "."
+        || model == ".."
+        || model.ends_with('.')
+    {
+        return Err(backend("Invalid model ID"));
+    }
+    Ok(())
+}
+
+fn model_path(model: &str) -> Result<PathBuf, LlmdError> {
+    validate_model_id(model)?;
+    Ok(model_dir()?.join(format!("{model}.litertlm")))
+}
+
+impl LiteRtProvider {
     pub async fn new() -> Result<Self, LlmdError> {
-        let manager = LitManager::new()
-            .await
-            .map_err(|error| LlmdError::Backend(error.to_string()))?;
-        Ok(Self { manager })
+        Self::with_pool_size(2).await
     }
 
     pub async fn with_pool_size(pool_size: usize) -> Result<Self, LlmdError> {
-        let manager = LitManager::new_with_pool_size(pool_size)
-            .await
-            .map_err(|error| LlmdError::Backend(error.to_string()))?;
-        Ok(Self { manager })
+        if pool_size == 0 {
+            return Err(backend("pool_size must be positive"));
+        }
+        Ok(Self {
+            slots: Arc::new(Semaphore::new(pool_size)),
+            #[cfg(not(target_os = "android"))]
+            engines: Arc::new(native::EngineCache::default()),
+        })
     }
 
+    /// Import a local .litertlm file, or download the built-in default model.
     pub async fn import_model(model: &str) -> Result<(), LlmdError> {
-        let manager = LitManager::new()
+        let source = PathBuf::from(model);
+        let local = source.is_file();
+        let id = if local {
+            if source.extension().and_then(|s| s.to_str()) != Some("litertlm") {
+                return Err(backend("Expected a .litertlm file"));
+            }
+            source
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .ok_or_else(|| backend("Invalid filename"))?
+        } else {
+            model
+        };
+        let destination = model_path(id)?;
+        if destination.is_file() {
+            return Ok(());
+        }
+        tokio::fs::create_dir_all(model_dir()?)
             .await
-            .map_err(|error| LlmdError::Backend(error.to_string()))?;
-        manager
-            .pull_quiet(model, None, None)
-            .await
-            .map_err(|error| LlmdError::Backend(error.to_string()))?;
+            .map_err(backend)?;
+        let temp = tempfile::NamedTempFile::new_in(model_dir()?).map_err(backend)?;
+        if local {
+            tokio::fs::copy(&source, temp.path())
+                .await
+                .map_err(backend)?;
+        } else {
+            if id != llmd_core::DEFAULT_MODEL {
+                return Err(backend(
+                    "Unknown download alias; import a local .litertlm file instead",
+                ));
+            }
+            let url = format!(
+                "https://huggingface.co/litert-community/{id}-litert-lm/resolve/main/{id}.litertlm"
+            );
+            let client = reqwest::Client::new();
+            let mut request = client.get(url);
+            if let Ok(token) = std::env::var("HF_TOKEN") {
+                request = request.bearer_auth(token);
+            }
+            let mut chunks = request
+                .send()
+                .await
+                .map_err(backend)?
+                .error_for_status()
+                .map_err(backend)?
+                .bytes_stream();
+            let mut file = tokio::fs::File::from_std(temp.reopen().map_err(backend)?);
+            use tokio::io::AsyncWriteExt;
+            while let Some(chunk) = chunks.next().await {
+                file.write_all(&chunk.map_err(backend)?)
+                    .await
+                    .map_err(backend)?;
+            }
+            file.flush().await.map_err(backend)?;
+        }
+        if temp.as_file().metadata().map_err(backend)?.len() == 0 {
+            return Err(backend("Model file is empty"));
+        }
+        temp.persist_noclobber(destination).map_err(backend)?;
         Ok(())
     }
 
     pub async fn delete_model(model: &str) -> Result<(), LlmdError> {
-        let manager = LitManager::new()
+        tokio::fs::remove_file(model_path(model)?)
             .await
-            .map_err(|error| LlmdError::Backend(error.to_string()))?;
-        manager
-            .remove_quiet(model)
-            .await
-            .map_err(|error| LlmdError::Backend(error.to_string()))?;
-        Ok(())
+            .map_err(backend)
     }
 }
 
 #[async_trait]
-impl ModelProvider for RlitertProvider {
+impl ModelProvider for LiteRtProvider {
     async fn list_models(&self) -> Result<Vec<ModelInfo>, LlmdError> {
-        let output = self
-            .manager
-            .list_models(false)
-            .await
-            .map_err(|error| LlmdError::Backend(error.to_string()))?;
-
-        Ok(parse_models(&output))
+        let mut entries = match tokio::fs::read_dir(model_dir()?).await {
+            Ok(entries) => entries,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(vec![]),
+            Err(e) => return Err(backend(e)),
+        };
+        let mut models = vec![];
+        while let Some(entry) = entries.next_entry().await.map_err(backend)? {
+            let path = entry.path();
+            if path.extension().and_then(|s| s.to_str()) == Some("litertlm")
+                && entry.file_type().await.map_err(backend)?.is_file()
+                && entry.metadata().await.map_err(backend)?.len() > 0
+            {
+                if let Some(id) = path.file_stem().and_then(|s| s.to_str()) {
+                    if validate_model_id(id).is_ok() {
+                        models.push(ModelInfo {
+                            id: id.to_owned(),
+                            owned_by: "litertlm-rs".into(),
+                        });
+                    }
+                }
+            }
+        }
+        models.sort_by(|a, b| a.id.cmp(&b.id));
+        Ok(models)
     }
 
     async fn chat(&self, request: ChatRequest) -> Result<ChatResponse, LlmdError> {
-        let prompt = messages_to_prompt(&request.messages);
-        let content = self
-            .manager
-            .run_completion(&request.model, &prompt)
-            .await
-            .map_err(|error| LlmdError::Backend(error.to_string()))?;
-
-        Ok(ChatResponse {
-            model: request.model,
-            content,
-        })
+        let model = request.model.clone();
+        let mut stream = self.chat_stream(request).await?;
+        let mut content = String::new();
+        while let Some(chunk) = stream.next().await {
+            content.push_str(&chunk?);
+        }
+        Ok(ChatResponse { model, content })
     }
 
     async fn chat_stream(&self, request: ChatRequest) -> Result<TokenStream, LlmdError> {
-        let prompt = messages_to_prompt(&request.messages);
-        let stream = self
-            .manager
-            .run_completion_stream(&request.model, &prompt)
-            .await
-            .map_err(|error| LlmdError::Backend(error.to_string()))?
-            .map(|item| item.map_err(|error| LlmdError::Backend(error.to_string())));
-
-        Ok(Box::pin(stream))
+        let path = model_path(&request.model)?;
+        if !path.is_file() {
+            return Err(LlmdError::ModelNotFound(request.model));
+        }
+        let permit = self.slots.clone().acquire_owned().await.map_err(backend)?;
+        #[cfg(not(target_os = "android"))]
+        let engines = self.engines.clone();
+        let (tx, rx) = tokio::sync::mpsc::channel(32);
+        tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            #[cfg(not(target_os = "android"))]
+            let result = native::generate(&engines, &path, &request, &tx);
+            #[cfg(target_os = "android")]
+            let result: Result<(), LlmdError> = {
+                let _ = (path, request);
+                Err(backend("Use the Android native bridge"))
+            };
+            if let Err(error) = result {
+                let _ = tx.blocking_send(Err(error));
+            }
+        });
+        Ok(Box::pin(tokio_stream::wrappers::ReceiverStream::new(rx)))
     }
-}
-
-fn parse_models(output: &str) -> Vec<ModelInfo> {
-    output
-        .lines()
-        .map(str::trim)
-        .filter(|line| {
-            !line.is_empty()
-                && !line.starts_with("Available")
-                && !line.starts_with("Downloaded")
-                && !line.starts_with("ALIAS")
-        })
-        .filter_map(|line| line.split_whitespace().next())
-        .map(|id| ModelInfo {
-            id: id.to_string(),
-            owned_by: "litert-lm".to_string(),
-        })
-        .collect()
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_models, RlitertProvider};
-    use llmd_core::{ChatMessage, ChatRequest, ModelProvider, DEFAULT_MODEL};
-
+    use super::*;
     #[test]
-    fn parses_litert_model_table() {
-        let output = "Downloaded models\nALIAS SIZE\ngemma-4-E2B-it 2.6GB\n";
-        let models = parse_models(output);
-        assert_eq!(models.len(), 1);
-        assert_eq!(models[0].id, "gemma-4-E2B-it");
-    }
-
-    #[tokio::test]
-    #[ignore = "requires LiteRT-LM runtime and a downloaded model"]
-    async fn real_rlitert_chat_smoke_test() {
-        let provider = RlitertProvider::new().await.unwrap();
-        let response = provider
-            .chat(ChatRequest {
-                model: DEFAULT_MODEL.to_string(),
-                messages: vec![ChatMessage {
-                    role: "user".to_string(),
-                    content: "Reply with one short sentence.".to_string(),
-                }],
-                stream: false,
-                max_tokens: Some(32),
-                temperature: Some(0.0),
-            })
-            .await
-            .unwrap();
-
-        assert_eq!(response.model, DEFAULT_MODEL);
-        assert!(!response.content.trim().is_empty());
+    fn model_ids_cannot_escape_store() {
+        for id in [
+            "",
+            ".",
+            "..",
+            "../model",
+            "C:\\model",
+            "a/b",
+            "x:stream",
+            "model.",
+        ] {
+            assert!(validate_model_id(id).is_err(), "{id}");
+        }
+        assert!(validate_model_id(llmd_core::DEFAULT_MODEL).is_ok());
     }
 }

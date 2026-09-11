@@ -2,7 +2,7 @@
 use llmd_core::{DEFAULT_HOST, DEFAULT_PORT};
 
 #[cfg_attr(target_os = "android", allow(dead_code))]
-const DESKTOP_PROVIDER_NAME: &str = "rlitert-lm";
+const DESKTOP_PROVIDER_NAME: &str = "litertlm-rs";
 #[cfg_attr(not(target_os = "android"), allow(dead_code))]
 const ANDROID_PROVIDER_NAME: &str = "litert-lm-android";
 const DISABLED_PROVIDER_NAME: &str = "disabled";
@@ -14,14 +14,14 @@ fn health() -> serde_json::Value {
 
 #[tauri::command]
 async fn import_model(model: String) -> Result<(), String> {
-    llmd_rlitert::RlitertProvider::import_model(&model)
+    llmd_rlitert::LiteRtProvider::import_model(&model)
         .await
         .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
 async fn delete_model(model: String) -> Result<(), String> {
-    llmd_rlitert::RlitertProvider::delete_model(&model)
+    llmd_rlitert::LiteRtProvider::delete_model(&model)
         .await
         .map_err(|error| error.to_string())
 }
@@ -93,7 +93,7 @@ pub fn run() {
 #[cfg(not(target_os = "android"))]
 fn start_platform_api_server() {
     tauri::async_runtime::spawn(async {
-        match llmd_rlitert::RlitertProvider::new().await {
+        match llmd_rlitert::LiteRtProvider::new().await {
             Ok(provider) => {
                 if let Err(error) =
                     llmd_server::serve(std::sync::Arc::new(provider), DEFAULT_HOST, DEFAULT_PORT)

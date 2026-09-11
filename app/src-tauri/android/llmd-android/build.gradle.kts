@@ -16,9 +16,6 @@ android {
         aidl = true
     }
 
-    kotlinOptions {
-        jvmTarget = "17"
-    }
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -26,10 +23,16 @@ android {
     }
 }
 
+kotlin {
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+    }
+}
+
 dependencies {
     api("androidx.activity:activity-ktx:1.10.1")
     implementation("androidx.datastore:datastore-preferences:1.2.1")
-    implementation("com.google.ai.edge.litertlm:litertlm-android:0.13.1")
+    implementation("com.google.ai.edge.litertlm:litertlm-android:0.16.1")
     implementation("com.google.android.material:material:1.12.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
 }

@@ -4,9 +4,9 @@
 
 ## Platform strategy
 
-- Desktop: Tauri v2 app, using `maceip/rlitert-lm` through the Rust `litert-lm` crate.
-- Terminal: Rust CLI/TUI, using `maceip/rlitert-lm`.
-- Android: Tauri mobile UI with native LiteRT-LM Android inference. Android does not use the host-platform binary download path from `rlitert-lm`.
+- Desktop: Tauri v2 app, using `litertlm-rs` bindings to the native LiteRT-LM C API.
+- Terminal: Rust CLI/TUI, using the same native bindings.
+- Android: Tauri mobile UI with native LiteRT-LM Android inference. Android uses the official Kotlin SDK rather than the desktop C API binding.
 
 Default model:
 
@@ -20,7 +20,7 @@ gemma-4-E2B-it
 app                    Tauri desktop and mobile shell
 cli                    Terminal CLI/TUI
 crates/llmd-core       Shared API types and provider trait
-crates/llmd-rlitert    Desktop/terminal provider backed by rlitert-lm
+crates/llmd-rlitert    Desktop/terminal provider backed by litertlm-rs
 crates/llmd-server     OpenAI-compatible HTTP API
 docs                   Architecture and test notes
 ```
@@ -66,6 +66,17 @@ curl http://127.0.0.1:11435/v1/chat/completions \
   }'
 ```
 
+`response_format` accepts OpenAI Chat Completions' `json_object` and `json_schema` objects. The
+desktop and Android providers pass schemas to LiteRT-LM's native constrained decoder.
+`json_object` uses an object schema; `json_schema` passes the supplied schema. Token limits
+can still truncate output. Unsupported schemas produce backend errors.
+
+```json
+{
+  "response_format": {"type": "json_object"}
+}
+```
+
 ## Desktop
 
 ```bash
@@ -74,9 +85,19 @@ npm install
 npm run tauri dev
 ```
 
-The desktop app has Status, Models, and Logs pages. On Models, enter a LiteRT-LM
-model name to download it, select a model to inspect its details, and delete it
-from its detail page when it is no longer needed.
+The desktop app has Status, Models, and Logs pages. On Models, enter a local `.litertlm`
+file path to import it, or `gemma-4-E2B-it` to download the default model (`HF_TOKEN` is
+supported). Files are stored under the OS local data directory in `llmd/models`.
+Set `LLMD_MODEL_DIR` to use another directory, including an existing directory of models.
+Old rlitert-lm downloads are not moved or deleted automatically; import them by file path.
+Model IDs are filenames without `.litertlm`. Import never overwrites an existing model.
+
+Desktop builds need libclang (`LIBCLANG_PATH` if not on the default search path).
+The pinned `litertlm-rs`/`litertlm-sys` 0.16.3 downloads checksum-verified LiteRT-LM
+0.16.0 native libraries and copies them beside Cargo executables. Distribute the native
+library beside the installed executable too. Windows requires the MSVC target; Intel
+macOS has no prebuilt in this binding. Android keeps using the official Kotlin SDK.
+Inference currently uses CPU, with `--pool-size` bounding concurrent requests.
 
 ## Android
 

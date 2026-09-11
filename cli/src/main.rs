@@ -8,7 +8,7 @@ use crossterm::{
 use llmd_core::{
     ChatMessage, ChatRequest, ModelProvider, DEFAULT_HOST, DEFAULT_MODEL, DEFAULT_PORT,
 };
-use llmd_rlitert::RlitertProvider;
+use llmd_rlitert::LiteRtProvider;
 use ratatui::{
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout},
@@ -71,17 +71,17 @@ async fn main() -> anyhow::Result<()> {
             port,
             pool_size,
         } => {
-            let provider = Arc::new(RlitertProvider::with_pool_size(pool_size).await?);
+            let provider = Arc::new(LiteRtProvider::with_pool_size(pool_size).await?);
             llmd_server::serve(provider, &host, port).await?;
         }
         Commands::Models => {
-            let provider = RlitertProvider::new().await?;
+            let provider = LiteRtProvider::new().await?;
             for model in provider.list_models().await? {
                 println!("{}", model.id);
             }
         }
         Commands::Chat { prompt, model } => {
-            let provider = RlitertProvider::new().await?;
+            let provider = LiteRtProvider::new().await?;
             let response = provider
                 .chat(ChatRequest {
                     model,
@@ -92,6 +92,7 @@ async fn main() -> anyhow::Result<()> {
                     stream: false,
                     max_tokens: None,
                     temperature: None,
+                    response_format: None,
                 })
                 .await?;
             println!("{}", response.content);
@@ -123,7 +124,7 @@ fn run_tui() -> anyhow::Result<()> {
             frame.render_widget(title, chunks[0]);
 
             let body = Paragraph::new(vec![
-                Line::from("Desktop and terminal inference uses rlitert-lm."),
+                Line::from("Desktop and terminal inference uses litertlm-rs."),
                 Line::from("Android will use native LiteRT-LM Android integration."),
                 Line::from("Press q to quit."),
             ])

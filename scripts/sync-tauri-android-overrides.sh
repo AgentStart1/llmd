@@ -90,6 +90,7 @@ fi
 
 apply_patch_script "${BUILD_FILE}" "${PATCHES_DIR}/transformations/min-sdk.perl"
 apply_patch_script "${ROOT_BUILD_FILE}" "${PATCHES_DIR}/transformations/kotlin-gradle-plugin.perl"
+apply_patch_script "${BUILD_FILE}" "${PATCHES_DIR}/transformations/kotlin-compiler-options.perl"
 
 if ! grep -Fq 'gradlePluginPortal()' "${ROOT_BUILD_FILE}"; then
   apply_patch_script "${ROOT_BUILD_FILE}" "${PATCHES_DIR}/insertion-points/gradle-plugin-portal.perl"

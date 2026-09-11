@@ -311,7 +311,7 @@ async function importModel() {
     return;
   }
 
-  const model = window.prompt("Enter the LiteRT-LM model name to download:", defaultModel)?.trim();
+  const model = window.prompt("Enter a local .litertlm file path, or gemma-4-E2B-it to download:", defaultModel)?.trim();
   if (!model) return;
 
   state.isMutatingModel = true;

@@ -10,6 +10,5 @@ rust-version.workspace = true
 anyhow.workspace = true
 appium-client = { version = "0.2.2", default-features = false, features = ["rustls-tls"] }
 fantoccini = "0.19.3"
-openssl = { version = "0.10", features = ["vendored"] }
 serde_json.workspace = true
 tokio.workspace = true
