@@ -92,7 +92,7 @@ pub fn generate(
         .messages
         .iter()
         .filter(|m| m.role != "system")
-        .map(|m| json!({"role":m.role,"content":m.content}))
+        .map(|m| json!({"role":native_role(&m.role),"content":m.content}))
         .collect::<Vec<_>>();
     let (last, history) = messages
         .split_last()
@@ -120,4 +120,22 @@ pub fn generate(
             }
         })
         .map_err(backend)
+}
+
+fn native_role(role: &str) -> &str {
+    match role {
+        "assistant" => "model",
+        role => role,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::native_role;
+
+    #[test]
+    fn translates_openai_assistant_role() {
+        assert_eq!(native_role("assistant"), "model");
+        assert_eq!(native_role("user"), "user");
+    }
 }
