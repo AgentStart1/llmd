@@ -13,15 +13,23 @@ fn health() -> serde_json::Value {
 }
 
 #[tauri::command]
-async fn import_model(model: String) -> Result<(), String> {
-    llmd_rlitert::LiteRtProvider::import_model(&model)
+async fn import_model(
+    provider: tauri::State<'_, std::sync::Arc<llmd_rlitert::LiteRtProvider>>,
+    model: String,
+) -> Result<(), String> {
+    provider
+        .import_model(&model)
         .await
         .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
-async fn delete_model(model: String) -> Result<(), String> {
-    llmd_rlitert::LiteRtProvider::delete_model(&model)
+async fn delete_model(
+    provider: tauri::State<'_, std::sync::Arc<llmd_rlitert::LiteRtProvider>>,
+    model: String,
+) -> Result<(), String> {
+    provider
+        .delete_model(&model)
         .await
         .map_err(|error| error.to_string())
 }
@@ -80,9 +88,15 @@ fn platform_api_base_url() -> Option<String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let provider = std::sync::Arc::new(
+        tauri::async_runtime::block_on(llmd_rlitert::LiteRtProvider::new())
+            .expect("failed to initialize LiteRT provider"),
+    );
+    let api_provider = provider.clone();
     tauri::Builder::default()
-        .setup(|_app| {
-            start_platform_api_server();
+        .manage(provider)
+        .setup(move |_app| {
+            start_platform_api_server(api_provider);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![health, import_model, delete_model])
@@ -91,24 +105,16 @@ pub fn run() {
 }
 
 #[cfg(not(target_os = "android"))]
-fn start_platform_api_server() {
-    tauri::async_runtime::spawn(async {
-        match llmd_rlitert::LiteRtProvider::new().await {
-            Ok(provider) => {
-                if let Err(error) =
-                    llmd_server::serve(std::sync::Arc::new(provider), DEFAULT_HOST, DEFAULT_PORT)
-                        .await
-                {
-                    eprintln!("failed to start desktop API server: {error}");
-                }
-            }
-            Err(error) => eprintln!("failed to initialize desktop provider: {error}"),
+fn start_platform_api_server(provider: std::sync::Arc<llmd_rlitert::LiteRtProvider>) {
+    tauri::async_runtime::spawn(async move {
+        if let Err(error) = llmd_server::serve(provider, DEFAULT_HOST, DEFAULT_PORT).await {
+            eprintln!("failed to start desktop API server: {error}");
         }
     });
 }
 
 #[cfg(target_os = "android")]
-fn start_platform_api_server() {
+fn start_platform_api_server(_provider: std::sync::Arc<llmd_rlitert::LiteRtProvider>) {
     // Android exposes LiteRT-LM only through the authorized Binder IPC service.
 }
 

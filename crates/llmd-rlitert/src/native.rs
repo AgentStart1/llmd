@@ -34,6 +34,14 @@ impl EngineCache {
         engines.insert(path.to_owned(), engine.clone());
         Ok(engine)
     }
+
+    pub fn invalidate(&self, path: &Path) -> Result<(), LlmdError> {
+        self.engines
+            .lock()
+            .map_err(|_| backend("Engine cache lock was poisoned"))?
+            .remove(path);
+        Ok(())
+    }
 }
 
 pub fn generate(

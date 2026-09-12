@@ -9,6 +9,7 @@ mod native;
 
 pub struct LiteRtProvider {
     slots: Arc<Semaphore>,
+    pool_size: u32,
     #[cfg(not(target_os = "android"))]
     engines: Arc<native::EngineCache>,
 }
@@ -56,13 +57,14 @@ impl LiteRtProvider {
         }
         Ok(Self {
             slots: Arc::new(Semaphore::new(pool_size)),
+            pool_size: u32::try_from(pool_size).map_err(backend)?,
             #[cfg(not(target_os = "android"))]
             engines: Arc::new(native::EngineCache::default()),
         })
     }
 
     /// Import a local .litertlm file, or download the built-in default model.
-    pub async fn import_model(model: &str) -> Result<(), LlmdError> {
+    pub async fn import_model(&self, model: &str) -> Result<(), LlmdError> {
         let source = PathBuf::from(model);
         let local = source.is_file();
         let id = if local {
@@ -125,10 +127,17 @@ impl LiteRtProvider {
         Ok(())
     }
 
-    pub async fn delete_model(model: &str) -> Result<(), LlmdError> {
-        tokio::fs::remove_file(model_path(model)?)
+    pub async fn delete_model(&self, model: &str) -> Result<(), LlmdError> {
+        let path = model_path(model)?;
+        let _permits = self
+            .slots
+            .clone()
+            .acquire_many_owned(self.pool_size)
             .await
-            .map_err(backend)
+            .map_err(backend)?;
+        #[cfg(not(target_os = "android"))]
+        self.engines.invalidate(&path)?;
+        tokio::fs::remove_file(path).await.map_err(backend)
     }
 }
 
