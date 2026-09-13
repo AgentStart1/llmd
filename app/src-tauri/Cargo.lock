@@ -2013,6 +2013,7 @@ dependencies = [
 name = "llmd-app"
 version = "0.1.0"
 dependencies = [
+ "litertlm-sys",
  "llmd-core",
  "llmd-rlitert",
  "llmd-server",

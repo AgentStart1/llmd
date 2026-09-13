@@ -46,6 +46,22 @@ fn model_path(model: &str) -> Result<PathBuf, LlmdError> {
     Ok(model_dir()?.join(format!("{model}.litertlm")))
 }
 
+fn existing_model_is_usable(path: &std::path::Path) -> Result<bool, LlmdError> {
+    match std::fs::metadata(path) {
+        Ok(metadata) if !metadata.is_file() => Err(backend(format!(
+            "Existing model destination is not a file: {}",
+            path.display()
+        ))),
+        Ok(metadata) if metadata.len() == 0 => Err(backend(format!(
+            "Existing model file is empty: {}",
+            path.display()
+        ))),
+        Ok(_) => Ok(true),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(backend(error)),
+    }
+}
+
 impl LiteRtProvider {
     pub async fn new() -> Result<Self, LlmdError> {
         Self::with_pool_size(2).await
@@ -79,7 +95,7 @@ impl LiteRtProvider {
             model
         };
         let destination = model_path(id)?;
-        if destination.is_file() {
+        if existing_model_is_usable(&destination)? {
             return Ok(());
         }
         tokio::fs::create_dir_all(model_dir()?)
@@ -209,6 +225,8 @@ impl ModelProvider for LiteRtProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
+
     #[test]
     fn model_ids_cannot_escape_store() {
         for id in [
@@ -224,5 +242,14 @@ mod tests {
             assert!(validate_model_id(id).is_err(), "{id}");
         }
         assert!(validate_model_id(llmd_core::DEFAULT_MODEL).is_ok());
+    }
+
+    #[test]
+    fn rejects_empty_existing_model_files() {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        assert!(existing_model_is_usable(file.path()).is_err());
+
+        file.write_all(b"model").unwrap();
+        assert!(existing_model_is_usable(file.path()).unwrap());
     }
 }

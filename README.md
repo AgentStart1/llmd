@@ -95,7 +95,8 @@ Model IDs are filenames without `.litertlm`. Import never overwrites an existing
 Desktop builds need libclang (`LIBCLANG_PATH` if not on the default search path).
 The pinned `litertlm-rs`/`litertlm-sys` 0.16.3 downloads checksum-verified LiteRT-LM
 0.16.0 native libraries and copies them beside Cargo executables. Distribute the native
-library beside the installed executable too. Windows requires the MSVC target; Intel
+library with the application bundle too; the platform-specific Tauri configs package it
+for Windows, Linux, and Apple Silicon macOS. Windows requires the MSVC target; Intel
 macOS has no prebuilt in this binding. Android keeps using the official Kotlin SDK.
 Inference currently uses CPU, with `--pool-size` bounding concurrent requests.
 

@@ -55,6 +55,17 @@ jobs:
       - name: Run Rust tests
         run: cargo test --workspace --locked
 
+      - name: Build Linux package
+        working-directory: app
+        run: npm run tauri -- build --bundles deb
+
+      - name: Verify Linux native library bundle
+        run: |
+          package="$(find app/src-tauri/target/release/bundle/deb -maxdepth 1 -name '*.deb' -print -quit)"
+          test -n "${package}"
+          dpkg-deb --contents "${package}" | grep -F 'usr/lib/llmd/liblitert-lm.so'
+          readelf -d app/src-tauri/target/release/llmd-app | grep -F '$ORIGIN/../lib/llmd'
+
   desktop-e2e:
     runs-on: windows-latest
 
