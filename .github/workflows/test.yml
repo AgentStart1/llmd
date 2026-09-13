@@ -55,6 +55,12 @@ jobs:
       - name: Run Rust tests
         run: cargo test --workspace --locked
 
+      - name: Build CLI
+        run: cargo build -p llmd --locked
+
+      - name: Test CLI end to end
+        run: ./scripts/test-cli.sh
+
       - name: Build Linux package
         working-directory: app
         run: npm run tauri -- build --bundles deb
