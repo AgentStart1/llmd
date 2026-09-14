@@ -34,4 +34,27 @@ chat="$(curl -fsS "${BASE_URL}/v1/chat/completions" \
   -d "${chat_payload}")"
 
 echo "${chat}" | jq -e '.choices[0].message.content | length > 0' >/dev/null
+
+structured_payload="$(jq -nc --arg model "${MODEL}" '{
+  model: $model,
+  messages: [{role: "user", content: "Set value to ok."}],
+  temperature: 0,
+  response_format: {
+    type: "json_schema",
+    json_schema: {
+      name: "answer",
+      strict: true,
+      schema: {
+        type: "object",
+        properties: {value: {type: "string"}},
+        required: ["value"],
+        additionalProperties: false
+      }
+    }
+  }
+}')"
+structured="$(curl -fsS "${BASE_URL}/v1/chat/completions" \
+  -H "Content-Type: application/json" \
+  -d "${structured_payload}")"
+echo "${structured}" | jq -er '.choices[0].message.content | fromjson | .value | strings' >/dev/null
 echo "OpenAI-compatible API test passed."

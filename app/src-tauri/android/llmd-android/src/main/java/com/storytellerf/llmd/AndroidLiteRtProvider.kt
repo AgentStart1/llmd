@@ -185,13 +185,14 @@ class AndroidLiteRtProvider(
         messages: List<LlmdChatMessage>,
         temperature: Double,
         reservation: RequestReservation,
+        responseFormat: com.google.ai.edge.litertlm.ResponseFormat? = null,
     ): Deferred<String> {
         check(reservation.owner === this) { "LiteRT-LM request reservation belongs to another provider" }
         check(isReady()) { "LiteRT-LM engine is not ready" }
         return try {
             enqueue {
                 check(isReady()) { "LiteRT-LM engine is not ready" }
-                generateLocked(systemPrompt, messages, temperature)
+                generateLocked(systemPrompt, messages, temperature, responseFormat)
             }.also { task -> task.invokeOnCompletion { reservation.release() } }
         } catch (error: Throwable) {
             reservation.release()
@@ -215,6 +216,7 @@ class AndroidLiteRtProvider(
         systemPrompt: String,
         messages: List<LlmdChatMessage>,
         temperature: Double,
+        responseFormat: com.google.ai.edge.litertlm.ResponseFormat?,
     ): String {
         val activeEngine = requireNotNull(engine) { "LiteRT-LM engine is not initialized" }
         val lastUserIndex = messages.indexOfLast { it.role == "user" }
@@ -226,6 +228,7 @@ class AndroidLiteRtProvider(
 
         activeEngine.createConversation(
             ConversationConfig(
+                enableResponseFormat = responseFormat != null,
                 systemInstruction = Contents.of(systemPrompt),
                 initialMessages = initialMessages,
                 tools = emptyList(),
@@ -238,7 +241,11 @@ class AndroidLiteRtProvider(
             ),
         ).use { conversation ->
             var previous = ""
-            conversation.sendMessageAsync(lastUserMessage).collect { message ->
+            conversation.sendMessageAsync(
+                lastUserMessage,
+                responseFormat = responseFormat,
+                thinkingConfig = if (responseFormat != null) com.google.ai.edge.litertlm.ThinkingConfig(enableThinking = false) else null,
+            ).collect { message ->
                 val rendered = message.textContent().ifBlank { conversation.safeRender(message) }
                 val delta = if (rendered.startsWith(previous)) rendered.removePrefix(previous) else rendered
                 previous = rendered

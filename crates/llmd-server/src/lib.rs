@@ -7,11 +7,14 @@ use axum::{
     Json, Router,
 };
 use futures_util::{stream as futures_stream, StreamExt};
-use llmd_core::{ChatMessage, ChatRequest, LlmdError, ModelProvider};
+use llmd_core::{ChatMessage, ChatRequest, LlmdError, ModelProvider, ResponseFormat};
 use serde::{Deserialize, Serialize};
 use std::{
     convert::Infallible,
-    sync::Arc,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
     time::{SystemTime, UNIX_EPOCH},
 };
 use tower_http::{
@@ -38,6 +41,7 @@ pub struct OpenAiChatRequest {
     pub stream: bool,
     pub max_tokens: Option<u32>,
     pub temperature: Option<f32>,
+    pub response_format: Option<ResponseFormat>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -84,6 +88,7 @@ impl From<OpenAiChatRequest> for ChatRequest {
             stream: request.stream,
             max_tokens: request.max_tokens,
             temperature: request.temperature,
+            response_format: request.response_format,
         }
     }
 }
@@ -276,6 +281,17 @@ async fn chat_stream(state: AppState, request: ChatRequest) -> Response {
     let mut first = true;
     let terminal_id = id.clone();
     let terminal_model = model.clone();
+    let failed = Arc::new(AtomicBool::new(false));
+    let stream_failed = failed.clone();
+    let terminal_failed = failed;
+    let stream = futures_stream::unfold((stream, false), |(mut stream, stopped)| async move {
+        if stopped {
+            return None;
+        }
+        let token = stream.next().await?;
+        let stopped = token.is_err();
+        Some((token, (stream, stopped)))
+    });
     let sse = stream
         .map(move |token| {
             let event = match token {
@@ -297,30 +313,38 @@ async fn chat_stream(state: AppState, request: ChatRequest) -> Response {
                     first = false;
                     Event::default().data(serde_json::to_string(&chunk).unwrap_or_default())
                 }
-                Err(error) => Event::default().event("error").data(error.to_string()),
+                Err(error) => {
+                    stream_failed.store(true, Ordering::Release);
+                    Event::default().event("error").data(error.to_string())
+                }
             };
             Ok::<_, Infallible>(event)
         })
-        .chain(futures_stream::iter([
-            Ok(Event::default().data(
-                serde_json::to_string(&OpenAiChunk {
-                    id: terminal_id,
-                    object: "chat.completion.chunk",
-                    created,
-                    model: terminal_model,
-                    choices: vec![OpenAiChunkChoice {
-                        index: 0,
-                        delta: OpenAiDelta {
-                            role: None,
-                            content: None,
-                        },
-                        finish_reason: Some("stop"),
-                    }],
-                })
-                .unwrap_or_default(),
-            )),
-            Ok(Event::default().data("[DONE]")),
-        ]));
+        .chain(
+            futures_stream::iter([
+                Ok(Event::default().data(
+                    serde_json::to_string(&OpenAiChunk {
+                        id: terminal_id,
+                        object: "chat.completion.chunk",
+                        created,
+                        model: terminal_model,
+                        choices: vec![OpenAiChunkChoice {
+                            index: 0,
+                            delta: OpenAiDelta {
+                                role: None,
+                                content: None,
+                            },
+                            finish_reason: Some("stop"),
+                        }],
+                    })
+                    .unwrap_or_default(),
+                )),
+                Ok(Event::default().data("[DONE]")),
+            ])
+            .take_while(move |_| {
+                futures_util::future::ready(!terminal_failed.load(Ordering::Acquire))
+            }),
+        );
 
     Sse::new(sse).into_response()
 }
@@ -348,7 +372,7 @@ fn now() -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use super::create_router;
+    use super::{create_router, OpenAiChatRequest, ResponseFormat};
     use async_trait::async_trait;
     use axum::{
         body::{to_bytes, Body},
@@ -382,7 +406,18 @@ mod tests {
             })
         }
 
-        async fn chat_stream(&self, _request: ChatRequest) -> Result<TokenStream, LlmdError> {
+        async fn chat_stream(&self, request: ChatRequest) -> Result<TokenStream, LlmdError> {
+            if request
+                .messages
+                .last()
+                .is_some_and(|message| message.content == "stream-error")
+            {
+                return Ok(Box::pin(stream::iter([
+                    Err(LlmdError::Backend("generation failed".to_string())),
+                    Ok("content after error".to_string()),
+                    Err(LlmdError::Backend("duplicate error".to_string())),
+                ])));
+            }
             Ok(Box::pin(stream::iter([
                 Ok("hello".to_string()),
                 Ok(" world".to_string()),
@@ -495,6 +530,41 @@ mod tests {
         );
     }
 
+    #[test]
+    fn parses_structured_response_formats() {
+        let json_object: OpenAiChatRequest = serde_json::from_value(serde_json::json!({
+            "model": "fake-model",
+            "messages": [],
+            "response_format": {"type": "json_object"}
+        }))
+        .unwrap();
+        assert!(matches!(
+            json_object.response_format,
+            Some(ResponseFormat::JsonObject)
+        ));
+
+        let json_schema: OpenAiChatRequest = serde_json::from_value(serde_json::json!({
+            "model": "fake-model",
+            "messages": [],
+            "response_format": {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "answer",
+                    "schema": {"type": "object", "properties": {"value": {"type": "string"}}},
+                    "strict": true
+                }
+            }
+        }))
+        .unwrap();
+        let request = ChatRequest::from(json_schema);
+        let Some(ResponseFormat::JsonSchema { json_schema }) = request.response_format else {
+            panic!("schema was lost during conversion");
+        };
+        assert_eq!(json_schema.name, "answer");
+        assert_eq!(json_schema.strict, Some(true));
+        assert_eq!(json_schema.schema["properties"]["value"]["type"], "string");
+    }
+
     #[tokio::test]
     async fn chat_completions_streams_sse_chunks() {
         let body = serde_json::json!({
@@ -524,5 +594,35 @@ mod tests {
         assert!(body.contains(" world"));
         assert!(body.contains("\"finish_reason\":\"stop\""));
         assert!(body.contains("data: [DONE]"));
+    }
+
+    #[tokio::test]
+    async fn chat_completions_stream_stops_after_error() {
+        let body = serde_json::json!({
+            "model": "fake-model",
+            "stream": true,
+            "messages": [{"role": "user", "content": "stream-error"}]
+        });
+
+        let response = app()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/chat/completions")
+                    .header("content-type", "application/json")
+                    .body(Body::from(body.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = body_text(response).await;
+        assert!(body.contains("event: error"));
+        assert!(body.contains("generation failed"));
+        assert!(!body.contains("content after error"));
+        assert!(!body.contains("duplicate error"));
+        assert!(!body.contains("\"finish_reason\":\"stop\""));
+        assert!(!body.contains("data: [DONE]"));
     }
 }

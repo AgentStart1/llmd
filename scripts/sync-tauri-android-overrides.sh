@@ -122,6 +122,8 @@ elif ! grep -Fq 'create("alpha")' "${BUILD_FILE}" || ! grep -Fq 'create("e2e")' 
   exit 1
 fi
 
+apply_patch_script "${BUILD_FILE}" "${PATCHES_DIR}/transformations/kotlin-compiler-options.perl"
+
 if ! grep -Fq 'apply(plugin = "com.starter.easylauncher")' "${BUILD_FILE}"; then
   apply_patch_script "${BUILD_FILE}" "${PATCHES_DIR}/insertion-points/easylauncher-plugin.perl"
   apply_template "${BUILD_FILE}" "__LLMD_EASYLAUNCHER_PLUGIN__" "${PATCHES_DIR}/easylauncher.gradle.kts"

@@ -2,10 +2,12 @@
 /app/node_modules/
 /app/dist/
 /app/src-tauri/target/
+/app/src-tauri/native/
 /app/src-tauri/android/*/build/
 /app/src-tauri/gen/android/
 /app/src-tauri/gen/schemas/
 *.log
 /models/**/*.litertlm
+*.xnnpack_cache
 /build/
 /.gradle/

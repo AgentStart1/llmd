@@ -36,6 +36,30 @@ pub struct ChatRequest {
     pub stream: bool,
     pub max_tokens: Option<u32>,
     pub temperature: Option<f32>,
+    pub response_format: Option<ResponseFormat>,
+}
+
+/// OpenAI-compatible structured-output options.
+///
+/// Providers pass JSON schemas to LiteRT-LM's native constrained decoder.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ResponseFormat {
+    Text,
+    JsonObject,
+    JsonSchema {
+        json_schema: JsonSchemaResponseFormat,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct JsonSchemaResponseFormat {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    pub schema: serde_json::Value,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub strict: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
