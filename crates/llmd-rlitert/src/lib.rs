@@ -47,7 +47,11 @@ fn model_path(model: &str) -> Result<PathBuf, LlmdError> {
 }
 
 fn existing_model_is_usable(path: &std::path::Path) -> Result<bool, LlmdError> {
-    match std::fs::metadata(path) {
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => Err(backend(format!(
+            "Existing model destination must not be a symbolic link: {}",
+            path.display()
+        ))),
         Ok(metadata) if !metadata.is_file() => Err(backend(format!(
             "Existing model destination is not a file: {}",
             path.display()
@@ -251,5 +255,19 @@ mod tests {
 
         file.write_all(b"model").unwrap();
         assert!(existing_model_is_usable(file.path()).unwrap());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_symlinked_existing_model_files() {
+        use std::os::unix::fs::symlink;
+
+        let directory = tempfile::tempdir().unwrap();
+        let source = directory.path().join("source.litertlm");
+        let destination = directory.path().join("destination.litertlm");
+        std::fs::write(&source, b"model").unwrap();
+        symlink(source, &destination).unwrap();
+
+        assert!(existing_model_is_usable(&destination).is_err());
     }
 }

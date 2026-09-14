@@ -284,6 +284,14 @@ async fn chat_stream(state: AppState, request: ChatRequest) -> Response {
     let failed = Arc::new(AtomicBool::new(false));
     let stream_failed = failed.clone();
     let terminal_failed = failed;
+    let stream = futures_stream::unfold((stream, false), |(mut stream, stopped)| async move {
+        if stopped {
+            return None;
+        }
+        let token = stream.next().await?;
+        let stopped = token.is_err();
+        Some((token, (stream, stopped)))
+    });
     let sse = stream
         .map(move |token| {
             let event = match token {
@@ -404,9 +412,11 @@ mod tests {
                 .last()
                 .is_some_and(|message| message.content == "stream-error")
             {
-                return Ok(Box::pin(stream::iter([Err(LlmdError::Backend(
-                    "generation failed".to_string(),
-                ))])));
+                return Ok(Box::pin(stream::iter([
+                    Err(LlmdError::Backend("generation failed".to_string())),
+                    Ok("content after error".to_string()),
+                    Err(LlmdError::Backend("duplicate error".to_string())),
+                ])));
             }
             Ok(Box::pin(stream::iter([
                 Ok("hello".to_string()),
@@ -610,6 +620,8 @@ mod tests {
         let body = body_text(response).await;
         assert!(body.contains("event: error"));
         assert!(body.contains("generation failed"));
+        assert!(!body.contains("content after error"));
+        assert!(!body.contains("duplicate error"));
         assert!(!body.contains("\"finish_reason\":\"stop\""));
         assert!(!body.contains("data: [DONE]"));
     }
