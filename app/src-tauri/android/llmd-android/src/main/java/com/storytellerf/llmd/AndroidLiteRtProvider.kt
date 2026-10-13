@@ -40,7 +40,8 @@ class AndroidLiteRtProvider(
         CLOSED,
     }
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val providerJob = SupervisorJob()
+    private val scope = CoroutineScope(providerJob + Dispatchers.IO)
     private val commands = Channel<Pair<CompletableDeferred<Unit>, Job>>(MAX_PENDING_REQUESTS)
     private val requestSlots = Channel<Unit>(MAX_PENDING_REQUESTS).also { slots ->
         repeat(MAX_PENDING_REQUESTS) { slots.trySend(Unit) }
@@ -58,14 +59,15 @@ class AndroidLiteRtProvider(
     private var closed = false
     private var loadedModelPath: String? = null
     private var engine: Engine? = null
-    private val initializationJob: Job
+    private val initialized = CompletableDeferred<Unit>()
 
     init {
-        initializationJob = scope.launch {
+        scope.launch {
             if (!initializeEngine()) return@launch
             if (closed) return@launch
 
             initializationState = InitializationState.INITIALIZED
+            initialized.complete(Unit)
             for ((start, command) in commands) {
                 start.complete(Unit)
                 command.join()
@@ -74,6 +76,8 @@ class AndroidLiteRtProvider(
     }
 
     fun isReady(): Boolean = initializationState == InitializationState.INITIALIZED && !closed
+
+    suspend fun awaitReady() = initialized.await()
 
     /**
      * Reserves capacity before a caller reads a request's image payload. The reservation must be
@@ -104,16 +108,19 @@ class AndroidLiteRtProvider(
             throw error
         } catch (error: LinkageError) {
             initializationFailed(error)
+        } catch (error: OutOfMemoryError) {
+            initializationFailed(error)
         } catch (error: Exception) {
             initializationFailed(error)
         }
     }
 
     private fun initializationFailed(error: Throwable): Boolean {
+        initialized.completeExceptionally(error)
         if (!closed) {
             initializationState = InitializationState.ERROR
             initializationError = error.message ?: error::class.java.simpleName
-            log("LiteRT-LM initialization failed: $initializationError")
+            log("LiteRT-LM initialization failed: ${error.javaClass.simpleName}")
         }
         commands.close(error)
         return false
@@ -122,10 +129,12 @@ class AndroidLiteRtProvider(
     suspend fun close() {
         if (closed) return
         closed = true
+        initialized.cancel()
         try {
             commands.close()
             scope.cancel()
-            withContext(NonCancellable) { initializationJob.join() }
+            // Conversation cleanup must finish before the shared engine is destroyed.
+            withContext(NonCancellable) { providerJob.join() }
         } finally {
             withContext(NonCancellable) { engine?.close() }
             engine = null
@@ -146,7 +155,8 @@ class AndroidLiteRtProvider(
             EngineConfig(
                 modelPath = file.absolutePath,
                 backend = Backend.GPU(),
-                visionBackend = Backend.GPU(),
+                // Keep vision on CPU to avoid a second large OpenCL allocation on mobile.
+                visionBackend = Backend.CPU(),
                 audioBackend = null,
                 maxNumTokens = null,
                 maxNumImages = MAX_IMAGES_PER_REQUEST,
@@ -155,14 +165,17 @@ class AndroidLiteRtProvider(
         )
         try {
             candidate.initialize()
+            // LiteRT-LM prepares modality executors lazily on first conversation creation.
+            // Complete that work before publishing Ready to clients.
+            candidate.createConversation(ConversationConfig()).close()
             if (closed) {
                 candidate.close()
                 return
             }
             engine = candidate
             loadedModelPath = file.absolutePath
-            log("LiteRT-LM GPU initialized in ${SystemClock.elapsedRealtime() - startedAt} ms")
-        } catch (error: Exception) {
+            log("LiteRT-LM language GPU / vision CPU initialized in ${SystemClock.elapsedRealtime() - startedAt} ms")
+        } catch (error: Throwable) {
             runCatching { candidate.close() }
             throw error
         }

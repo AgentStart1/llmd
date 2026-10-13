@@ -127,6 +127,7 @@ class IpcSampleActivity : ComponentActivity() {
             while (true) {
                 val health = call { callback -> activeService.healthAsync(callback) }
                 check(health.errorType() == null) { health.errorMessage() }
+                check(health.optBoolean("serviceEnabled")) { "Switch on LLMD and wait until Ready before running the sample" }
                 if (health.optBoolean("engineReady")) break
                 check(health.optString("engineState") != "error") {
                     health.optString("engineError", "LiteRT-LM initialization failed")
@@ -138,14 +139,15 @@ class IpcSampleActivity : ComponentActivity() {
         updateStatus("Checking model list…")
         val models = call { callback -> activeService.listModelsAsync(callback) }
         check(models.errorType() == null) { models.errorMessage() }
-        check(models.getJSONArray("data").length() == 1) { "Expected exactly one imported model" }
+        val model = call { callback -> activeService.healthAsync(callback) }.getString("activeModel")
+        check((0 until models.getJSONArray("data").length()).any { models.getJSONArray("data").getJSONObject(it).getString("id") == model }) { "Running model is not in the inventory" }
 
         updateStatus("Checking text chat IPC…")
-        val textReply = chat(activeService, textRequest("Reply with sample-ok."))
+        val textReply = chat(activeService, textRequest(model, "Reply with sample-ok."))
         check(textReply.isNotBlank()) { "Text chat response was empty" }
 
         updateStatus("Checking image chat IPC…")
-        val imageReply = chat(activeService, imageRequest())
+        val imageReply = chat(activeService, imageRequest(model))
         check(imageReply.isNotBlank()) { "Image chat response was empty" }
         finishRun("PASS: text and image IPC completed")
     }
@@ -159,11 +161,11 @@ class IpcSampleActivity : ComponentActivity() {
             .getString("content")
     }
 
-    private fun textRequest(prompt: String): JSONObject = JSONObject()
-        .put("model", MODEL)
+    private fun textRequest(model: String, prompt: String): JSONObject = JSONObject()
+        .put("model", model)
         .put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", prompt)))
 
-    private fun imageRequest(): JSONObject {
+    private fun imageRequest(model: String): JSONObject {
         val imageFile = File(File(cacheDir, "images"), "sample.png").apply { parentFile?.mkdirs() }
         val bitmap = Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)
         try {
@@ -175,7 +177,7 @@ class IpcSampleActivity : ComponentActivity() {
         val imageUri = FileProvider.getUriForFile(this, "$packageName.fileprovider", imageFile)
         grantUriPermission(targetPackage, imageUri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
         return JSONObject()
-            .put("model", MODEL)
+            .put("model", model)
             .put(
                 "messages",
                 JSONArray().put(
@@ -247,7 +249,6 @@ class IpcSampleActivity : ComponentActivity() {
         const val ENGINE_START_TIMEOUT_MS = 5 * 60 * 1000L
         const val EXTRA_CALLER_PACKAGE = "caller_package"
         const val EXTRA_LLMD_PACKAGE = "llmdPackage"
-        const val MODEL = "gemma-4-E2B-it"
         const val TAG = "LlmdIpcSample"
     }
 }

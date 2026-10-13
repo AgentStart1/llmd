@@ -33,12 +33,27 @@ appear across all messages in a request. The service verifies the URI owner, MIM
 image bounds, and read grant before passing image bytes to LiteRT-LM. System messages must contain
 text only.
 
-The LiteRT engine uses the GPU backend for language and vision execution. GPU initialization or
-inference failure is returned to the caller instead of retrying on CPU. The health response includes
+The LiteRT engine uses GPU for language and a fixed CPU backend for vision, avoiding the second
+large OpenCL allocation observed on memory-limited phones. This is configured before initialization;
+errors do not select another backend or model. Startup prepares the first conversation's modality
+executors before reporting Ready. The health response includes
 `engineReady`; callers should wait for it to become `true`, because generation requests fail
 immediately while the engine is initializing or unavailable. Android manifests declare the optional
 `libvndksupport.so` and `libOpenCL.so` vendor libraries so supported devices can load their OpenCL
 driver. Logcat entries tagged `llmd` report initialization and generation duration.
+
+The model list reports the actual nonempty files in app-private `files/models`, using their
+filename stems as IDs. No default or fallback model exists. `chatCompletionAsync` requires a
+nonblank `model` matching the currently running model; an absent, unknown, or different ID
+returns an error. Binding IPC and calling health/list never initialize a model.
+
+On Status, the user explicitly chooses a model and switches **Keep model service on** on.
+The private foreground service owns loading and unloading independently of Binder clients.
+Health includes `serviceState` (`off`, `starting`, `ready`, `stopping`, `error`),
+`serviceEnabled`, `selectedModel`, and `activeModel` (only populated when Ready).
+An Off service must be enabled in the app; callers should not retry it as a cold start.
+Switching off cancels outstanding requests and releases the engine. Neither GPU errors nor
+model errors select another model or execution backend.
 
 Each external caller must be authorized through
 `com.storytellerf.llmd.action.AUTHORIZE_CALLER` before IPC calls return model or chat results.

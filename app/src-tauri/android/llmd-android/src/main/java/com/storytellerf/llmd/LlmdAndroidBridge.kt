@@ -17,148 +17,110 @@ object LlmdAndroidBridge {
     private val providerMutex = Mutex()
     private var appContext: Context? = null
     @Volatile private var provider: AndroidLiteRtProvider? = null
-    private var selectedModelPath = ""
+    @Volatile private var loadedModelId: String? = null
 
-    fun configure(context: Context) {
-        val applicationContext = context.applicationContext
-        appContext = applicationContext
-        selectedModelPath = defaultModelFile(applicationContext).absolutePath
-    }
+    fun configure(context: Context) { appContext = context.applicationContext }
 
-    suspend fun initialize(context: Context) = providerMutex.withLock {
-        configure(context)
-        if (provider == null) {
-            provider = AndroidLiteRtProvider(
-                modelPath = selectedModelPath,
-                cacheDir = context.applicationContext.cacheDir.absolutePath,
-            ) { android.util.Log.i("llmd", it) }
+    private fun inventory() = ModelInventory(File(requireNotNull(appContext).filesDir, "models"))
+
+    suspend fun startModel(model: String) {
+        val engine = providerMutex.withLock {
+            require(provider == null) { "Stop the current service before starting a model" }
+            val file = inventory().resolve(model)
+            AndroidLiteRtProvider(file.absolutePath, requireNotNull(appContext).cacheDir.absolutePath) {
+                android.util.Log.i("llmd", it)
+            }.also { provider = it; loadedModelId = model }
         }
+        engine.awaitReady()
     }
 
     suspend fun close() = providerMutex.withLock {
-        provider?.close()
-        provider = null
+        try { provider?.close() } finally { provider = null; loadedModelId = null }
     }
 
-    /** Replaces the model without allowing a concurrent IPC request to start a stale provider. */
-    suspend fun replaceDefaultModel(context: Context, source: Uri) = providerMutex.withLock {
+    suspend fun importModel(context: Context, source: Uri, name: String) = providerMutex.withLock {
+        requireStopped()
         configure(context)
-        provider?.close()
-        provider = null
-        try {
-            copyDefaultModel(context, source)
-            provider = createProvider(context)
-        } catch (error: Throwable) {
-            // The existing destination is preserved until the replacement is ready. Restore its
-            // engine when importing the new file fails.
-            if (File(selectedModelPath).isUsableModelFile()) {
-                provider = createProvider(context)
-            }
-            throw error
+        withContext(Dispatchers.IO) {
+            val destination = inventory().destination(name)
+            val temp = File.createTempFile("import-", ".tmp", destination.parentFile)
+            try {
+                requireNotNull(context.contentResolver.openInputStream(source)).use { input ->
+                    temp.outputStream().use { output -> input.copyTo(output) }
+                }
+                require(temp.length() > 0L) { "Selected model file is empty" }
+                require(temp.renameTo(destination)) { "Unable to save imported model" }
+            } finally { temp.delete() }
         }
     }
 
-    suspend fun listModels(): List<String> = providerMutex.withLock { listModelsSync() }
+    suspend fun listModels(): List<String> = withContext(Dispatchers.IO) { inventory().files().map { it.nameWithoutExtension } }
 
     suspend fun deleteModel(model: String) = providerMutex.withLock {
-        require(model == DEFAULT_MODEL) { "Unsupported model: $model" }
-        val modelFile = File(selectedModelPath)
-        require(modelFile.isUsableModelFile()) { "Model file does not exist: $selectedModelPath" }
-
-        provider?.close()
-        provider = null
-        require(modelFile.delete()) { "Unable to delete model file: $selectedModelPath" }
+        requireStopped()
+        require(inventory().resolve(model).delete()) { "Unable to delete model" }
     }
 
-    fun listModelsJson(): String = JSONArray(listModelsSync()).toString()
+    private fun requireStopped() {
+        require(LlmdRuntime.host.state.value == LlmdServiceState.Off || LlmdRuntime.host.state.value is LlmdServiceState.Failed) {
+            "Switch off the service before changing model files"
+        }
+        require(provider == null) { "Model is still unloading" }
+    }
 
     fun modelStateJson(): String {
-        val path = selectedModelPath.ifBlank {
-            appContext?.let { defaultModelFile(it).absolutePath }.orEmpty()
-        }
-        return JSONObject()
-            .put("defaultModel", DEFAULT_MODEL)
-            .put("modelPath", path)
-            .put("models", JSONArray(listModelsSync()))
+        val files = inventory().files()
+        return JSONObject().put("models", JSONArray(files.map { it.nameWithoutExtension }))
+            .put("modelPaths", JSONObject(files.associate { it.nameWithoutExtension to it.absolutePath }))
             .toString()
     }
 
-    fun healthJson(): String = JSONObject()
-        .put("status", "ok")
-        .put("provider", "litert-lm-android")
-        .put("transport", "binder_ipc")
-        .put("engineReady", provider?.isReady() == true)
-        .put(
-            "engineState",
-            provider?.initializationState?.name?.lowercase() ?: "uninitialized",
-        )
-        .put("engineError", provider?.initializationError)
-        .toString()
-
-    private fun listModelsSync(): List<String> =
-        when {
-            File(selectedModelPath).isUsableModelFile() -> listOf(DEFAULT_MODEL)
-            else -> emptyList()
+    fun healthJson(): String {
+        val state = LlmdRuntime.host.state.value
+        val name = when (state) {
+            LlmdServiceState.Off -> "off"
+            is LlmdServiceState.Starting -> "starting"
+            is LlmdServiceState.Ready -> "ready"
+            is LlmdServiceState.Stopping -> "stopping"
+            is LlmdServiceState.Failed -> "error"
         }
+        return JSONObject().put("status", "ok").put("provider", "litert-lm-android").put("transport", "binder_ipc")
+            .put("selectedModel", when (state) {
+                LlmdServiceState.Off -> JSONObject.NULL
+                is LlmdServiceState.Starting -> state.model
+                is LlmdServiceState.Ready -> state.model
+                is LlmdServiceState.Stopping -> state.model
+                is LlmdServiceState.Failed -> state.model
+            })
+            .put("serviceState", name).put("serviceEnabled", state is LlmdServiceState.Starting || state is LlmdServiceState.Ready)
+            .put("activeModel", if (state is LlmdServiceState.Ready) loadedModelId else JSONObject.NULL)
+            .put("engineReady", state is LlmdServiceState.Ready && provider?.isReady() == true)
+            .put("engineState", if (state is LlmdServiceState.Failed) "error" else provider?.initializationState?.name?.lowercase() ?: "uninitialized")
+            .put("engineError", if (state is LlmdServiceState.Failed) "Model initialization failed; check the file and available memory" else JSONObject.NULL)
+            .toString()
+    }
 
     suspend fun chatCompletion(requestJson: String, callingUid: Int = android.os.Process.myUid()): String {
         val request = JSONObject(requestJson)
-        val model = request.optString("model", DEFAULT_MODEL)
-        require(model == DEFAULT_MODEL) { "Unsupported model: $model" }
+        val model = request.getString("model")
+        require(model.isNotBlank()) { "Specify a model" }
         val (activeProvider, reservation) = providerMutex.withLock {
-            require(File(selectedModelPath).isUsableModelFile()) {
-                "Model file does not exist: $selectedModelPath"
-            }
-            val currentProvider = requireNotNull(provider) { "Android LiteRT bridge is not initialized" }
-            currentProvider.tryReserveRequest()
-                ?.let { currentProvider to it }
+            inventory().resolve(model)
+            require(LlmdRuntime.host.state.value is LlmdServiceState.Ready) { "Switch on the LLMD service and wait until Ready" }
+            require(model == loadedModelId) { "Requested model is not the running model" }
+            val currentProvider = requireNotNull(provider) { "Model is not loaded" }
+            currentProvider.tryReserveRequest()?.let { currentProvider to it }
                 ?: error("LiteRT-LM request queue is full or the engine is not ready")
         }
-
         return try {
             val messages = parseMessages(request.getJSONArray("messages"), callingUid)
-            val systemPrompt = messages.filter { it.role == "system" }.map { it.text }
-            val temperature = when {
-                request.isNull("temperature") -> 0.0
-                else -> request.optDouble("temperature", 0.0)
-            }
-            val task = activeProvider.generate(
-                systemPrompt = systemPrompt.joinToString("\n\n"),
-                messages = messages,
-                temperature = temperature,
-                reservation = reservation,
-                responseFormat = parseResponseFormat(request),
-            )
-            task.await()
-        } catch (error: CancellationException) {
-            throw error
-        } finally {
-            reservation.release()
+            val systemPrompt = messages.filter { it.role == "system" }.joinToString("\n\n") { it.text }
+            val generation = activeProvider.generate(systemPrompt, messages, request.optDouble("temperature", 0.0), reservation,
+                parseResponseFormat(request))
+            try { generation.await() }
+            catch (cancelled: CancellationException) { generation.cancel(); throw cancelled }
         }
-    }
-
-    private fun createProvider(context: Context): AndroidLiteRtProvider = AndroidLiteRtProvider(
-        modelPath = selectedModelPath,
-        cacheDir = context.applicationContext.cacheDir.absolutePath,
-    ) { android.util.Log.i("llmd", it) }
-
-    private suspend fun copyDefaultModel(context: Context, source: Uri): File = withContext(Dispatchers.IO) {
-        val destination = defaultModelFile(context)
-        val destinationDir = requireNotNull(destination.parentFile) { "Model directory is unavailable" }
-        val temp = File(destinationDir, "${destination.name}.tmp")
-        destinationDir.mkdirs()
-        try {
-            context.contentResolver.openInputStream(source).use { input ->
-                requireNotNull(input) { "Unable to open selected model file" }
-                temp.outputStream().use { output -> input.copyTo(output) }
-            }
-            require(temp.length() > 0L) { "Selected model file is empty" }
-            if (destination.exists()) destination.delete()
-            require(temp.renameTo(destination)) { "Unable to save imported model" }
-            destination
-        } finally {
-            if (temp.exists()) temp.delete()
-        }
+        finally { reservation.release() }
     }
 
     internal fun parseMessages(array: JSONArray, callingUid: Int = android.os.Process.myUid()): List<LlmdChatMessage> {
@@ -266,14 +228,6 @@ object LlmdAndroidBridge {
         return LlmdChatContent.Image(bytes, requireNotNull(mimeType))
     }
 
-    private fun File.isUsableModelFile(): Boolean = exists() && isFile && length() > 0L
-
-    fun defaultModelFile(context: Context): File =
-        File(File(context.applicationContext.filesDir, MODEL_DIR), DEFAULT_MODEL_FILE_NAME)
-
-    private const val DEFAULT_MODEL = "gemma-4-E2B-it"
-    private const val DEFAULT_MODEL_FILE_NAME = "$DEFAULT_MODEL.litertlm"
-    private const val MODEL_DIR = "models"
     private const val MAX_IMAGE_BYTES = 750_000
     private const val MAX_IMAGE_DIMENSION = 4_096
     private const val MAX_IMAGE_PIXELS = 4_000_000L

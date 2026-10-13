@@ -66,13 +66,13 @@ cargo test --manifest-path app/src-tauri/Cargo.toml
 For OpenAI-compatible HTTP API changes, test against a running endpoint:
 
 ```bash
-LLMD_OPENAI_BASE_URL=http://127.0.0.1:11435 scripts/test-openai-api.sh
+LLMD_TEST_MODEL=<imported-model-id> LLMD_OPENAI_BASE_URL=http://127.0.0.1:11435 scripts/test-openai-api.sh
 ```
 
 For Android model-import validation, run the Appium flow against a connected device:
 
 ```bash
-ANDROID_UDID=<device-serial> scripts/test-android-appium.sh
+GEMMA_MODEL_PATH=/path/to/chosen-model.litertlm ANDROID_UDID=<device-serial> scripts/test-android-appium.sh
 ```
 
 For Android IPC authorization changes, manually verify on device or emulator:

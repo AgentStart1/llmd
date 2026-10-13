@@ -22,7 +22,6 @@ const DEBUG_PACKAGE: &str = "com.storytellerf.llmd.debug";
 const E2E_PACKAGE: &str = "com.storytellerf.llmd.e2e";
 const MAIN_ACTIVITY: &str = "com.storytellerf.llmd.MainActivity";
 const SAMPLE_ACTIVITY: &str = "com.storytellerf.llmd.sample.IpcSampleActivity";
-const DEFAULT_MODEL: &str = "gemma-4-E2B-it";
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -30,7 +29,9 @@ async fn main() -> Result<()> {
     ensure_model_exists(&config.model_path)?;
 
     run_status(command("adb", &config).arg("wait-for-device"))?;
-    build_and_install_apk(&config)?;
+    if env::var("LLMD_ANDROID_E2E_SKIP_BUILD").as_deref() != Ok("1") {
+        build_and_install_apk(&config)?;
+    }
     push_model_to_downloads(&config)?;
 
     let mut appium = ensure_appium(&config)?;
@@ -40,6 +41,9 @@ async fn main() -> Result<()> {
         let _ = child.wait();
     }
     appium_result?;
+    if env::var("LLMD_ANDROID_E2E_IMPORT_ONLY").as_deref() == Ok("1") {
+        return Ok(());
+    }
     let mut appium = ensure_appium(&config)?;
     let sample_result = run_ipc_sample(&config).await;
     if let Some(child) = appium.as_mut() {
@@ -74,7 +78,7 @@ impl Config {
             .to_path_buf();
         let model_path = env::var_os("GEMMA_MODEL_PATH")
             .map(PathBuf::from)
-            .unwrap_or_else(|| root_dir.join("models/gemma/gemma-4-E2B-it.litertlm"));
+            .context("Set GEMMA_MODEL_PATH to an explicit .litertlm file")?;
         let model_file_name = model_path
             .file_name()
             .and_then(|value| value.to_str())
@@ -172,20 +176,10 @@ fn build_and_install_apk(config: &Config) -> Result<()> {
 
     let apk = latest_apk(config)?;
     let sample_apk = build_sample_apk(config)?;
-    let _ = command("adb", config)
-        .args(["uninstall", &config.android_package])
-        .status();
+    run_status(command("adb", config).args(["install", "-r"]).arg(apk))?;
     run_status(
         command("adb", config)
-            .args(["install", "-r", "-d"])
-            .arg(apk),
-    )?;
-    let _ = command("adb", config)
-        .args(["uninstall", &config.sample_package])
-        .status();
-    run_status(
-        command("adb", config)
-            .args(["install", "-r", "-d"])
+            .args(["install", "-r"])
             .arg(sample_apk),
     )
 }
@@ -341,6 +335,7 @@ async fn import_model_with_appium(config: &Config) -> Result<()> {
     capabilities.app_activity(MAIN_ACTIVITY);
     capabilities.set_bool("appium:autoGrantPermissions", true);
     capabilities.set_bool("appium:noReset", true);
+    capabilities.set_bool("appium:forceAppLaunch", true);
     capabilities.set_number("appium:newCommandTimeout", 180u64.into());
 
     let client = ClientBuilder::rustls(capabilities)
@@ -352,7 +347,35 @@ async fn import_model_with_appium(config: &Config) -> Result<()> {
         wait_click(&client, text("Models"), Duration::from_secs(180)).await?;
         wait_click(&client, text("Import model"), Duration::from_secs(180)).await?;
         select_model_in_picker(&client, config).await?;
-        wait_for_any(&client, &[text(DEFAULT_MODEL)], Duration::from_secs(900)).await
+        // Reimports keep the old ID visible until the new copy is atomically published.
+        client
+            .appium_wait()
+            .at_most(Duration::from_secs(900))
+            .for_element(By::xpath(
+                "//*[@resource-id='import-model' and @enabled='true']",
+            ))
+            .await
+            .context("wait for model import to finish")?;
+        let id = Path::new(&config.model_path)
+            .file_stem()
+            .and_then(|name| name.to_str())
+            .context("Model file must have an ID")?;
+        wait_for_any(&client, &[text(id)], Duration::from_secs(900)).await?;
+        wait_click(&client, text("Status"), Duration::from_secs(30)).await?;
+        wait_click(
+            &client,
+            "//*[@resource-id='service-model']".to_string(),
+            Duration::from_secs(30),
+        )
+        .await?;
+        wait_click(&client, text(id), Duration::from_secs(30)).await?;
+        wait_click(
+            &client,
+            "//*[@resource-id='service-enabled']".to_string(),
+            Duration::from_secs(30),
+        )
+        .await?;
+        wait_for_any(&client, &[text("Ready")], Duration::from_secs(900)).await
     }
     .await;
 
@@ -382,6 +405,7 @@ async fn run_ipc_sample(config: &Config) -> Result<()> {
     capabilities.app_activity(SAMPLE_ACTIVITY);
     capabilities.set_bool("appium:autoGrantPermissions", true);
     capabilities.set_bool("appium:noReset", true);
+    capabilities.set_bool("appium:forceAppLaunch", true);
     let client = ClientBuilder::rustls(capabilities)
         .connect(&config.appium_url)
         .await
@@ -418,7 +442,7 @@ async fn select_model_in_picker(
     let model_name = Path::new(&config.device_model_path)
         .file_name()
         .and_then(|value| value.to_str())
-        .unwrap_or(DEFAULT_MODEL);
+        .context("Model path must have a file name")?;
     let model_without_extension = model_name.trim_end_matches(".litertlm");
 
     ensure_downloads_directory(client).await?;
@@ -529,7 +553,8 @@ async fn wait_click(
         .at_most(timeout)
         .check_every(Duration::from_millis(500))
         .for_element(By::xpath(&selector))
-        .await?;
+        .await
+        .with_context(|| format!("find Android UI control: {selector}"))?;
     element.click().await?;
     Ok(())
 }
@@ -541,9 +566,9 @@ async fn try_click(
 ) -> Result<bool> {
     match wait_click(client, selector, timeout).await {
         Ok(()) => Ok(true),
-        Err(error) if error.to_string().contains("no such element") => Ok(false),
-        Err(error) if error.to_string().contains("NoSuchElement") => Ok(false),
-        Err(error) if error.to_string().contains("timeout") => Ok(false),
+        Err(error) if format!("{error:#}").contains("no such element") => Ok(false),
+        Err(error) if format!("{error:#}").contains("NoSuchElement") => Ok(false),
+        Err(error) if format!("{error:#}").contains("timeout") => Ok(false),
         Err(error) => Err(error),
     }
 }

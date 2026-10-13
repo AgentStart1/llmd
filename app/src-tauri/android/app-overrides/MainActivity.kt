@@ -11,6 +11,10 @@ import android.webkit.WebView
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.enableEdgeToEdge
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.core.content.ContextCompat
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -21,6 +25,7 @@ import org.json.JSONObject
 class MainActivity : TauriActivity() {
   private val activityScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
   private var webView: WebView? = null
+  private var statusJob: Job? = null
   private val importModel = registerForActivityResult(object : ActivityResultContracts.OpenDocument() {
     override fun createIntent(context: Context, input: Array<String>): Intent =
       super.createIntent(context, input).putExtra(DocumentsContract.EXTRA_INITIAL_URI, DOWNLOADS_URI)
@@ -32,9 +37,13 @@ class MainActivity : TauriActivity() {
 
     activityScope.launch {
       val result = runCatching {
-        require(isLiteRtModelFile(uri)) { "Select a .litertlm model file" }
-        LlmdAndroidBridge.replaceDefaultModel(this@MainActivity, uri)
+        withContext(Dispatchers.IO) {
+          val name = modelFileName(uri)
+          require(name?.endsWith(MODEL_FILE_EXTENSION, ignoreCase = true) == true) { "Select a .litertlm model file" }
+          LlmdAndroidBridge.importModel(this@MainActivity, uri, requireNotNull(name))
+        }
       }
+      result.exceptionOrNull()?.let { if (it is CancellationException) throw it }
       emitModelMutation(
         status = if (result.isSuccess) "imported" else "error",
         error = result.exceptionOrNull()?.message,
@@ -55,6 +64,17 @@ class MainActivity : TauriActivity() {
       isAppearanceLightStatusBars = false
       isAppearanceLightNavigationBars = false
     }
+    statusJob = activityScope.launch {
+      LlmdRuntime.host.state.collect {
+        val detail = LlmdAndroidBridge.healthJson()
+        webView?.evaluateJavascript("window.dispatchEvent(new CustomEvent('llmd-service-changed',{detail:$detail}))", null)
+      }
+    }
+  }
+
+  override fun onStop() {
+    statusJob?.cancel()
+    super.onStop()
   }
 
   override fun onWebViewCreate(webView: WebView) {
@@ -76,8 +96,7 @@ class MainActivity : TauriActivity() {
     webView?.post { webView?.evaluateJavascript(script, null) }
   }
 
-  private fun isLiteRtModelFile(uri: Uri): Boolean {
-    val displayName = contentResolver.query(
+  private fun modelFileName(uri: Uri): String? = contentResolver.query(
       uri,
       arrayOf(OpenableColumns.DISPLAY_NAME),
       null,
@@ -87,12 +106,10 @@ class MainActivity : TauriActivity() {
       if (!cursor.moveToFirst()) return@use null
       cursor.getString(cursor.getColumnIndexOrThrow(OpenableColumns.DISPLAY_NAME))
     }
-    return displayName?.endsWith(MODEL_FILE_EXTENSION, ignoreCase = true) == true
-  }
 
   inner class ModelImportBridge {
     @JavascriptInterface
-    fun importDefaultModel() {
+    fun importModel() {
       runOnUiThread {
         importModel.launch(
           arrayOf(
@@ -118,6 +135,17 @@ class MainActivity : TauriActivity() {
 
     @JavascriptInterface
     fun getHealthState(): String = LlmdAndroidBridge.healthJson()
+
+    @JavascriptInterface
+    fun setServiceEnabled(enabled: Boolean, model: String) {
+      runOnUiThread {
+        val intent = Intent(this@MainActivity, LlmdModelService::class.java)
+          .setAction(if (enabled) LlmdModelService.ACTION_START else LlmdModelService.ACTION_STOP)
+          .putExtra(LlmdModelService.EXTRA_MODEL, model)
+        if (enabled) ContextCompat.startForegroundService(this@MainActivity, intent)
+        else startService(intent)
+      }
+    }
   }
 
   private companion object {

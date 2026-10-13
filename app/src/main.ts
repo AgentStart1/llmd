@@ -2,8 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import "./styles.css";
 
 type AndroidModelState = {
-  defaultModel: string;
-  modelPath: string;
+  modelPaths: Record<string, string>;
   models: string[];
   status?: string;
   error?: string | null;
@@ -29,14 +28,14 @@ declare global {
       deleteModel(model: string): void;
       getHealthState(): string;
       getModelState(): string;
-      importDefaultModel(): void;
+      importModel(): void;
+      setServiceEnabled(enabled: boolean, model: string): void;
     };
   }
 }
 
 const app = document.querySelector<HTMLElement>("#app");
 const defaultApiBase = "http://127.0.0.1:11435";
-const defaultModel = "gemma-4-E2B-it";
 const state: {
   health: HealthState | null;
   healthError: string | null;
@@ -46,6 +45,7 @@ const state: {
   modelError: string | null;
   mutationError: string | null;
   models: Model[];
+  selectedModel: string | null;
   logs: LogEntry[];
 } = {
   health: null,
@@ -56,10 +56,16 @@ const state: {
   modelError: null,
   mutationError: null,
   models: [],
+  selectedModel: null,
   logs: [],
 };
 
 window.addEventListener("hashchange", render);
+window.addEventListener("llmd-service-changed", (event) => {
+  state.health = (event as CustomEvent<HealthState>).detail;
+  state.healthError = null;
+  render();
+});
 window.addEventListener("llmd-models-changed", (event) => {
   const androidState = (event as CustomEvent<AndroidModelState>).detail;
   state.models = modelsFromAndroid(androidState);
@@ -110,8 +116,16 @@ function render() {
 function renderStatusPage(): string {
   const isAndroid = Boolean(window.llmdAndroid);
   const health = state.health;
-  const status = state.healthError ? "Unavailable" : health ? "Running" : "Checking";
-  const tone = state.healthError ? "danger" : health ? "success" : "neutral";
+  const serviceState = typeof health?.serviceState === "string" ? health.serviceState : "off";
+  const status = state.healthError ? "Unavailable" : isAndroid
+    ? ({ off: "Switched off", starting: "Loading model", ready: "Ready", stopping: "Stopping", error: "Could not load model" }[serviceState] ?? "Unavailable")
+    : health ? "Running" : "Checking";
+  const tone = state.healthError || serviceState === "error" ? "danger" : serviceState === "ready" || (!isAndroid && health) ? "success" : "neutral";
+  const enabled = serviceState === "starting" || serviceState === "ready";
+  const selected = state.selectedModel ?? (typeof health?.selectedModel === "string" ? health.selectedModel : null);
+  const description = state.healthError ?? (isAndroid
+    ? ({ off: "Choose a model and switch on the service before using it.", starting: "Preparing the model. Wait until the service shows Ready.", ready: "The model stays loaded while the service is on.", stopping: "Releasing model resources…", error: "Check the model file and available memory, then try again." }[serviceState] ?? "Check service status.")
+    : health ? "The local model service is ready to receive requests." : "Contacting the local service…");
 
   return `
     <header class="page-header">
@@ -129,9 +143,18 @@ function renderStatusPage(): string {
       <div>
         <p class="eyebrow">Service</p>
         <h2>${status}</h2>
-        <p>${state.healthError ?? (health ? "The local model service is ready to receive requests." : "Contacting the local service…")}</p>
+        <p>${escapeHtml(description)}</p>
       </div>
     </section>
+    ${isAndroid ? `<section class="panel service-controls">
+      <label for="service-model">Model to load</label>
+      <select id="service-model" ${enabled || serviceState === "stopping" || state.isMutatingModel ? "disabled" : ""}>
+        <option value="">Choose a model</option>
+        ${state.models.map(model => `<option value="${escapeHtml(model.id)}" ${model.id === selected ? "selected" : ""}>${escapeHtml(model.id)}</option>`).join("")}
+      </select>
+      <label class="service-toggle"><input id="service-enabled" type="checkbox" ${enabled ? "checked" : ""}
+        ${serviceState === "stopping" || state.isMutatingModel || (!enabled && !selected) ? "disabled" : ""}> Keep model service on</label>
+    </section>` : ""}
     <section class="detail-grid">
       <article class="card">
         <p class="card-label">Connection</p>
@@ -141,12 +164,12 @@ function renderStatusPage(): string {
       <article class="card">
         <p class="card-label">Available models</p>
         <p class="card-value">${state.models.length}</p>
-        <p class="card-hint">${state.models.length === 1 ? "One model is ready" : "Open Models to manage them"}</p>
+        <p class="card-hint">${state.models.length === 1 ? "One imported model" : "Open Models to manage them"}</p>
       </article>
       <article class="card">
-        <p class="card-label">Default model</p>
-        <p class="card-value compact">${defaultModel}</p>
-        <p class="card-hint">Used when no model is specified</p>
+        <p class="card-label">Loaded model</p>
+        <p class="card-value compact">${escapeHtml(typeof health?.activeModel === "string" ? health.activeModel : "None")}</p>
+        <p class="card-hint">Requests must explicitly name an imported model</p>
       </article>
     </section>
     <section class="panel health-panel">
@@ -242,6 +265,14 @@ function renderLogsPage(): string {
 }
 
 function bindPageEvents(route: string) {
+  document.querySelector<HTMLSelectElement>("#service-model")?.addEventListener("change", (event) => {
+    state.selectedModel = (event.target as HTMLSelectElement).value || null;
+    render();
+  });
+  document.querySelector<HTMLInputElement>("#service-enabled")?.addEventListener("change", (event) => {
+    const model = state.selectedModel ?? (typeof state.health?.selectedModel === "string" ? state.health.selectedModel : "");
+    window.llmdAndroid?.setServiceEnabled((event.target as HTMLInputElement).checked, model);
+  });
   document.querySelector<HTMLButtonElement>("#check-health")?.addEventListener("click", () => void checkHealth());
   document.querySelector<HTMLButtonElement>("#refresh-models")?.addEventListener("click", () => void refreshModels());
   document.querySelector<HTMLButtonElement>("#import-model")?.addEventListener("click", () => void importModel());
@@ -307,11 +338,11 @@ async function importModel() {
     state.mutationError = null;
     addLog("Waiting for a model file to be selected.", "info");
     render();
-    window.llmdAndroid.importDefaultModel();
+    window.llmdAndroid.importModel();
     return;
   }
 
-  const model = window.prompt("Enter a local .litertlm file path, or gemma-4-E2B-it to download:", defaultModel)?.trim();
+  const model = window.prompt("Enter a local .litertlm file path or an explicit supported download alias:")?.trim();
   if (!model) return;
 
   state.isMutatingModel = true;
@@ -358,7 +389,7 @@ async function deleteCurrentModel() {
 }
 
 function modelsFromAndroid(androidState: AndroidModelState): Model[] {
-  return androidState.models.map((id) => ({ id, ownedBy: "litert-lm-android", path: androidState.modelPath }));
+  return androidState.models.map((id) => ({ id, ownedBy: "litert-lm-android", path: androidState.modelPaths[id] }));
 }
 
 function parseAndroidModelState(json: string): AndroidModelState {
