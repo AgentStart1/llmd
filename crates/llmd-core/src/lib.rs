@@ -3,7 +3,6 @@ use futures_core::Stream;
 use serde::{Deserialize, Serialize};
 use std::pin::Pin;
 
-pub const DEFAULT_MODEL: &str = "gemma-4-E2B-it";
 pub const DEFAULT_HOST: &str = "127.0.0.1";
 pub const DEFAULT_PORT: u16 = 11435;
 
