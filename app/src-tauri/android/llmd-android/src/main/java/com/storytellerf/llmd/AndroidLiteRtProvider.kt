@@ -8,7 +8,6 @@ import com.google.ai.edge.litertlm.Conversation
 import com.google.ai.edge.litertlm.ConversationConfig
 import com.google.ai.edge.litertlm.Engine
 import com.google.ai.edge.litertlm.EngineConfig
-import com.google.ai.edge.litertlm.ExperimentalApi
 import com.google.ai.edge.litertlm.Message
 import com.google.ai.edge.litertlm.SamplerConfig
 import java.io.File
@@ -240,16 +239,13 @@ class AndroidLiteRtProvider(
                 ),
             ),
         ).use { conversation ->
-            var previous = ""
             conversation.sendMessageAsync(
                 lastUserMessage,
                 responseFormat = responseFormat,
                 thinkingConfig = if (responseFormat != null) com.google.ai.edge.litertlm.ThinkingConfig(enableThinking = false) else null,
             ).collect { message ->
-                val rendered = message.textContent().ifBlank { conversation.safeRender(message) }
-                val delta = if (rendered.startsWith(previous)) rendered.removePrefix(previous) else rendered
-                previous = rendered
-                if (delta.isNotEmpty()) result.append(delta)
+                // The SDK emits delta chunks; preserve repeats, whitespace and empty text.
+                result.append(message.textContent())
             }
         }
 
@@ -284,12 +280,6 @@ class AndroidLiteRtProvider(
                 else -> content.toString()
             }
         }.stripChatTemplateMarkers()
-
-    @OptIn(ExperimentalApi::class)
-    private fun Conversation.safeRender(message: Message): String =
-        runCatching { renderMessageIntoString(message) }
-            .getOrDefault(message.toString())
-            .stripChatTemplateMarkers()
 
     private companion object {
         // One request may run while one additional request waits for the serialized GPU engine.
