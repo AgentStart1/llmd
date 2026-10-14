@@ -29,107 +29,35 @@ coinstalled variants cannot receive another variant's test actions.
 `LLMD_ANDROID_E2E_LOCK_HELD=1` is only for a caller that already owns the device lock.
 The runner installs in place without clearing app data or allowing version downgrades.
 
-## Physical validation, 2026-10-13
+## Background operation
 
-The full Gemma 4 E4B file was checked against its official SHA256, imported through the
-system picker, and reported alongside the existing E2B file. Import did not select or
-load it. Explicit service startup initialized its GPU language engine in about 28 seconds.
-The first Summer image request then caused Android's low-memory killer to terminate LLMD
-while its vision graph was being prepared (about 3.6 GB process RSS on a 6 GB device).
-That recognition test failed; language initialization alone does not prove image readiness.
-No model or CPU fallback was used. Imported models and authorization survived the restart.
+User-visible Binder clients should bind with `BIND_AUTO_CREATE | BIND_IMPORTANT` so
+inference shares the foreground caller's process importance. This does not load models
+or make the engine immune to system memory reclamation. The sample demonstrates the
+binding; the explicit foreground model service retains ownership across disconnects.
 
-Summer's opt-in Binder contract test passed with the service Off: exact model inventory,
-missing/blank/unknown IDs, valid IDs while Off, repeated health calls, and rebinding all
-left the engine unloaded. Successful contract checks do not establish E4B image accuracy.
-The Ready-state contract also passed: the active ID stayed E4B, requests for the other
-imported model failed, and disconnect/rebind did not unload or replace the engine.
-The all-GPU build also failed a text call while lazily creating the vision executor.
-Keeping language on GPU and fixing vision to CPU, then preparing a conversation before
-Ready, initialized E4B successfully (18.5 seconds). Two subsequent text requests passed
-across a client disconnect (5.8 and 4.5 seconds), with one initialization and the same
-active model. No model weights, dependency versions, or context limits were reduced.
-An actual order image still triggered low-memory termination with this fixed backend
-configuration. E4B image recognition therefore remains unpassed on this device; executor
-preparation and text success do not guarantee image allocation fits available RAM.
-Switching the service off through its UI released the engine: process PSS fell from
-about 3.66 GB to 172 MB. The Off-state Binder contract passed again after shutdown.
-Appium import, explicit E4B selection, and service readiness passed in import-only mode.
-The runner force-launches its variant, waits for atomic replacement to complete even when
-the old ID remains visible, and preserves timeout causes while polling readiness.
-Binder contract/text checks were exercised separately; image generation remains unpassed.
+On Android 13+, MainActivity requests notification permission before allocating the
+selected engine. It retains the pending explicit model ID across Activity recreation.
+The Status UI reports notification permission and opens standard app settings. Depending
+on the manufacturer, users may also need to allow background running and protect or lock
+LLMD in Recent apps. These system choices are separate from the service switch.
 
-## Large-heap experiment, 2026-10-14
+## Verification
 
-On the same 6 GB Android 15 device, the runtime reports a 256 MB ordinary managed-heap
-limit and a 512 MB large-heap limit. An experimental Debug APK set `android:largeHeap`
-and PackageManager confirmed `LARGE_HEAP` on the installed app. Model, precision,
-backend configuration, dependencies, and context limits were unchanged.
+Live Binder checks covered exact model inventory, missing/blank/unknown IDs, valid IDs
+while Off, mismatched IDs while Ready, and disconnect/rebind without loading or replacing
+a model. Explicit E4B text and synthetic balance-image generation passed, including
+Summer's preview/persistence flow. Guided text and image response-format probes also
+passed with the exact active model unchanged. Memory-pressure and OEM reclamation
+failures were observed separately; passing fixtures do not establish arbitrary-image
+accuracy or universal background stability. No model/backend fallback was used.
 
-E4B initialized in 16.8 seconds; process PSS was about 3.63 GB while the Dalvik heap
-was about 4 MB. The synthetic 900×600 balance image reached native visual preprocessing
-(2340 patches). The low-memory killer then terminated LLMD to reclaim 3,769,700 KB RSS.
-No recognition result was produced. The waiting Summer test was stopped after the
-process-death evidence was captured and is not counted as a pass.
+Background validation checks that no engine starts while the notification dialog is
+visible, permission status and the settings shortcut work, and the first image request
+after background idle retains the same service process. Keep raw logs, device identifiers,
+hardware specifications, and device-specific memory measurements outside the repository.
 
-The ordinary-heap baseline also exited after its WebView renderer was killed, so this
-run does not establish a paired image-latency comparison. The enabled run independently
-establishes that large heap does not prevent the observed E4B image memory failure.
-The experimental flag was removed and the ordinary-heap Debug APK restored.
-
-## ZRAM experiment, 2026-10-14
-
-The same device initially had no swap and an uninitialized ZRAM device. Temporarily
-enabling rooted ADB allowed configuring 3 GiB of ZRAM with the existing LZO compressor
-and unchanged swappiness (100). `/proc/swaps` confirmed activation. No startup files,
-model weights, precision, dependency versions, context limits, or backend choices changed;
-the installed Debug APK did not have `LARGE_HEAP` enabled.
-
-E4B reached Ready in 19.0 seconds. Before inference, roughly 349 MiB of system pages
-were swapped out. The same synthetic 900×600 image reached native preprocessing at
-2340 patches, but the low-memory killer terminated the WebView renderer and then LLMD
-at 4,027,912 KB RSS with 52,640 KB of process swap. Android exit history confirmed
-`LOW_MEMORY`. No recognition result was produced; the waiting test was stopped and is
-not counted as passing. After the failure, swap held about 600 MiB of logical pages;
-ZRAM's observed peak physical allocation was about 175 MiB.
-
-Rooted debugging was restored to disabled. ZRAM remains enabled for the current boot
-only, without persistent system changes. This configuration did not make E4B image
-inference fit the device's memory budget; no fallback model was selected.
-
-The follow-up test increased ZRAM to 6 GiB, retaining LZO and swappiness 100. E4B
-initialized in 16.6 seconds, and the identical image again reached 2340-patch native
-preprocessing. The low-memory killer terminated LLMD at 3,996,928 KB RSS with
-99,840 KB process swap; exit history again reported `LOW_MEMORY`. A system swap
-sample held approximately 529 MiB, far below the configured capacity. No recognition
-result was produced and the waiting test was stopped. Increasing swap capacity alone
-did not prevent the failure. Rooted debugging was disabled again; 6 GiB ZRAM remains
-enabled only for the current boot. No model, precision, backend, or fallback changed.
-
-After the experiments, ZRAM was disabled at the user's request: `swapoff` completed,
-the device was reset to a zero disksize, and no swap devices remained active. Rooted
-debugging was restored to disabled. The phone no longer retains the experimental swap
-configuration.
-
-## Follow-up device verification, 2026-10-14
-
-An Android 16 NX741J with about 14.9 GiB usable RAM and an existing 12 GiB swap was
-tested with the current Debug APK. No system swap, backend, weights, precision, or
-dependency settings were changed. The imported E4B matched SHA256
-`0b2a8980ce155fd97673d8e820b4d29d9c7d99b8fa6806f425d969b145bd52e0` and was reported
-under its filename-derived ID `gemma-4-E4B-it-verified`.
-
-The initial full Summer image attempt reached preprocessing but the vendor SPKL manager
-terminated LLMD after it became a foreground-service process (`adj=50`). Keeping LLMD's
-Activity foreground, direct Binder balance recognition passed twice in 6.4 and 4.8 seconds,
-returning -245.70 from the same synthetic image with the exact active model unchanged.
-The subsequent warm-engine Summer recognition/preview/persistence journey passed twice.
-The earlier 6 GB device's failures remain valid; cold background stability and complex
-image accuracy are not established by these successful basic-image checks.
-
-Guided response-format probes on the same foreground E4B subsequently passed twice:
-image `text`, image `json_object`, image `json_schema` with Summer's complete balance
-schema, and text-only `json_schema` requesting integer value 7. All eight live assertions
-passed (25.9 and 25.6 seconds per four-case suite). Both guided image modes preserved
-the actual -245.70 balance and the active model stayed unchanged. This demonstrates
-basic guided output for this device/model, not accuracy across arbitrary images/models.
+Project host/Android static checks, Tauri packaging/tests, Android lifecycle/inventory
+unit tests, and Summer build/unit/Lint checks passed. The optional full LLMD Android
+Lint run still reports generated TV manifest issues `MissingTvBanner` and
+`ImpliedTouchscreenHardware`; no new Lint errors were found in the changed code.

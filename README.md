@@ -110,6 +110,13 @@ calling it. The foreground service keeps that exact model loaded across client d
 switching off cancels requests and releases it. Stop the service before changing models or
 model files. Process termination returns it to Off; it does not silently restart a model.
 
+On Android 13+, allow the notification prompt when switching the service on so its
+ongoing status and stop action are visible. Status shows whether notifications are
+allowed. If your device restricts background apps, open **System background settings**
+and allow LLMD to run in the background. Depending on the manufacturer, also open
+the LLMD card's menu in Recent apps and choose **Lock app** or the equivalent protection
+option. These system settings are separate from the model-service switch.
+
 Download an explicitly chosen model, for example the full vision-capable Gemma 4 E4B file:
 
 ```bash

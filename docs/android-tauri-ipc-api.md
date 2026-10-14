@@ -10,6 +10,13 @@ apps bind to `com.storytellerf.llmd.action.BIND_IPC` and use the `ILlmdService` 
 - `listModelsAsync`, and
 - `chatCompletionAsync`.
 
+Bind user-visible inference clients with `Context.BIND_AUTO_CREATE or Context.BIND_IMPORTANT`.
+The ordinary binding only raises the service to visible-process importance; the important
+binding lets it share the foreground client's priority while bound. This does not start or
+reload an engine and cannot guarantee survival under genuine system memory exhaustion.
+The sample client demonstrates this binding. See the
+[Android binding contract](https://developer.android.com/reference/android/content/Context#BIND_IMPORTANT).
+
 `chatCompletionAsync` accepts OpenAI-style message content as either a plain string or a content
 array. Android multi-modal requests may include text parts and a `content://` URI in `image_url`
 parts. The URI must come from the calling app's `FileProvider`, and the caller must grant llmd
