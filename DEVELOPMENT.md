@@ -76,3 +76,23 @@ The ordinary-heap baseline also exited after its WebView renderer was killed, so
 run does not establish a paired image-latency comparison. The enabled run independently
 establishes that large heap does not prevent the observed E4B image memory failure.
 The experimental flag was removed and the ordinary-heap Debug APK restored.
+
+## ZRAM experiment, 2026-10-14
+
+The same device initially had no swap and an uninitialized ZRAM device. Temporarily
+enabling rooted ADB allowed configuring 3 GiB of ZRAM with the existing LZO compressor
+and unchanged swappiness (100). `/proc/swaps` confirmed activation. No startup files,
+model weights, precision, dependency versions, context limits, or backend choices changed;
+the installed Debug APK did not have `LARGE_HEAP` enabled.
+
+E4B reached Ready in 19.0 seconds. Before inference, roughly 349 MiB of system pages
+were swapped out. The same synthetic 900×600 image reached native preprocessing at
+2340 patches, but the low-memory killer terminated the WebView renderer and then LLMD
+at 4,027,912 KB RSS with 52,640 KB of process swap. Android exit history confirmed
+`LOW_MEMORY`. No recognition result was produced; the waiting test was stopped and is
+not counted as passing. After the failure, swap held about 600 MiB of logical pages;
+ZRAM's observed peak physical allocation was about 175 MiB.
+
+Rooted debugging was restored to disabled. ZRAM remains enabled for the current boot
+only, without persistent system changes. This configuration did not make E4B image
+inference fit the device's memory budget; no fallback model was selected.
