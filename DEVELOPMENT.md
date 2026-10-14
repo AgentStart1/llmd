@@ -105,3 +105,8 @@ sample held approximately 529 MiB, far below the configured capacity. No recogni
 result was produced and the waiting test was stopped. Increasing swap capacity alone
 did not prevent the failure. Rooted debugging was disabled again; 6 GiB ZRAM remains
 enabled only for the current boot. No model, precision, backend, or fallback changed.
+
+After the experiments, ZRAM was disabled at the user's request: `swapoff` completed,
+the device was reset to a zero disksize, and no swap devices remained active. Rooted
+debugging was restored to disabled. The phone no longer retains the experimental swap
+configuration.
