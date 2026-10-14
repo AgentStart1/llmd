@@ -2,6 +2,11 @@ package com.storytellerf.llmd
 
 import android.content.Context
 import android.content.Intent
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import android.provider.Settings
+import androidx.core.app.NotificationManagerCompat
 import android.net.Uri
 import android.os.Bundle
 import android.provider.DocumentsContract
@@ -26,6 +31,13 @@ class MainActivity : TauriActivity() {
   private val activityScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
   private var webView: WebView? = null
   private var statusJob: Job? = null
+  private var pendingModelStart: String? = null
+  private val notificationPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) {
+    val model = pendingModelStart
+    pendingModelStart = null
+    if (model != null) startModelService(model)
+    emitServiceState()
+  }
   private val importModel = registerForActivityResult(object : ActivityResultContracts.OpenDocument() {
     override fun createIntent(context: Context, input: Array<String>): Intent =
       super.createIntent(context, input).putExtra(DocumentsContract.EXTRA_INITIAL_URI, DOWNLOADS_URI)
@@ -52,9 +64,15 @@ class MainActivity : TauriActivity() {
   }
 
   override fun onCreate(savedInstanceState: Bundle?) {
+    pendingModelStart = savedInstanceState?.getString("pendingModelStart")
     enableEdgeToEdge()
     LlmdAndroidBridge.configure(this)
     super.onCreate(savedInstanceState)
+  }
+
+  override fun onSaveInstanceState(outState: Bundle) {
+    pendingModelStart?.let { outState.putString("pendingModelStart", it) }
+    super.onSaveInstanceState(outState)
   }
 
   override fun onStart() {
@@ -66,8 +84,7 @@ class MainActivity : TauriActivity() {
     }
     statusJob = activityScope.launch {
       LlmdRuntime.host.state.collect {
-        val detail = LlmdAndroidBridge.healthJson()
-        webView?.evaluateJavascript("window.dispatchEvent(new CustomEvent('llmd-service-changed',{detail:$detail}))", null)
+        emitServiceState()
       }
     }
   }
@@ -94,6 +111,19 @@ class MainActivity : TauriActivity() {
       .toString()
     val script = "window.dispatchEvent(new CustomEvent('llmd-models-changed',{detail:$detail}))"
     webView?.post { webView?.evaluateJavascript(script, null) }
+  }
+
+  private fun uiHealthJson(): String = JSONObject(LlmdAndroidBridge.healthJson())
+    .put("notificationsEnabled", NotificationManagerCompat.from(this).areNotificationsEnabled())
+    .toString()
+
+  private fun emitServiceState() {
+    webView?.evaluateJavascript("window.dispatchEvent(new CustomEvent('llmd-service-changed',{detail:${uiHealthJson()}}))", null)
+  }
+
+  private fun startModelService(model: String) {
+    ContextCompat.startForegroundService(this, Intent(this, LlmdModelService::class.java)
+      .setAction(LlmdModelService.ACTION_START).putExtra(LlmdModelService.EXTRA_MODEL, model))
   }
 
   private fun modelFileName(uri: Uri): String? = contentResolver.query(
@@ -134,16 +164,29 @@ class MainActivity : TauriActivity() {
     fun getModelState(): String = LlmdAndroidBridge.modelStateJson()
 
     @JavascriptInterface
-    fun getHealthState(): String = LlmdAndroidBridge.healthJson()
+    fun getHealthState(): String = uiHealthJson()
+
+    @JavascriptInterface
+    fun openBackgroundSettings() {
+      runOnUiThread {
+        startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")))
+      }
+    }
 
     @JavascriptInterface
     fun setServiceEnabled(enabled: Boolean, model: String) {
       runOnUiThread {
-        val intent = Intent(this@MainActivity, LlmdModelService::class.java)
-          .setAction(if (enabled) LlmdModelService.ACTION_START else LlmdModelService.ACTION_STOP)
-          .putExtra(LlmdModelService.EXTRA_MODEL, model)
-        if (enabled) ContextCompat.startForegroundService(this@MainActivity, intent)
-        else startService(intent)
+        if (enabled) {
+          if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(this@MainActivity,
+              Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            // Do not allocate the engine while the permission dialog makes this app non-top.
+            pendingModelStart = model
+            notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+          } else startModelService(model)
+        } else {
+          pendingModelStart = null
+          startService(Intent(this@MainActivity, LlmdModelService::class.java).setAction(LlmdModelService.ACTION_STOP))
+        }
       }
     }
   }

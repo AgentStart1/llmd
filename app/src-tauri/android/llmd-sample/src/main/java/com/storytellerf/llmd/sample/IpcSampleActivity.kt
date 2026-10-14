@@ -94,7 +94,7 @@ class IpcSampleActivity : ComponentActivity() {
         bound = bindService(
             Intent(ACTION_BIND_IPC).setPackage(targetPackage),
             connection,
-            Context.BIND_AUTO_CREATE,
+            Context.BIND_AUTO_CREATE or Context.BIND_IMPORTANT,
         )
         if (!bound) finishRun("FAIL: llmd IPC service is unavailable")
     }

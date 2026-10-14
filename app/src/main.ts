@@ -30,6 +30,7 @@ declare global {
       getModelState(): string;
       importModel(): void;
       setServiceEnabled(enabled: boolean, model: string): void;
+      openBackgroundSettings(): void;
     };
   }
 }
@@ -154,6 +155,10 @@ function renderStatusPage(): string {
       </select>
       <label class="service-toggle"><input id="service-enabled" type="checkbox" ${enabled ? "checked" : ""}
         ${serviceState === "stopping" || state.isMutatingModel || (!enabled && !selected) ? "disabled" : ""}> Keep model service on</label>
+      <p class="card-hint">Service notifications: ${typeof health?.notificationsEnabled === "boolean" ? health.notificationsEnabled ? "Allowed" : "Disabled" : "Unknown"}</p>
+      <p class="card-hint">For background use, allow notifications and background running in system settings.</p>
+      <p class="card-hint">If your device still closes LLMD, lock it in Recent apps.</p>
+      <button id="background-settings" class="button secondary">System background settings</button>
     </section>` : ""}
     <section class="detail-grid">
       <article class="card">
@@ -265,6 +270,7 @@ function renderLogsPage(): string {
 }
 
 function bindPageEvents(route: string) {
+  document.querySelector<HTMLButtonElement>("#background-settings")?.addEventListener("click", () => window.llmdAndroid?.openBackgroundSettings());
   document.querySelector<HTMLSelectElement>("#service-model")?.addEventListener("change", (event) => {
     state.selectedModel = (event.target as HTMLSelectElement).value || null;
     render();
