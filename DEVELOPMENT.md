@@ -110,3 +110,19 @@ After the experiments, ZRAM was disabled at the user's request: `swapoff` comple
 the device was reset to a zero disksize, and no swap devices remained active. Rooted
 debugging was restored to disabled. The phone no longer retains the experimental swap
 configuration.
+
+## Follow-up device verification, 2026-10-14
+
+An Android 16 NX741J with about 14.9 GiB usable RAM and an existing 12 GiB swap was
+tested with the current Debug APK. No system swap, backend, weights, precision, or
+dependency settings were changed. The imported E4B matched SHA256
+`0b2a8980ce155fd97673d8e820b4d29d9c7d99b8fa6806f425d969b145bd52e0` and was reported
+under its filename-derived ID `gemma-4-E4B-it-verified`.
+
+The initial full Summer image attempt reached preprocessing but the vendor SPKL manager
+terminated LLMD after it became a foreground-service process (`adj=50`). Keeping LLMD's
+Activity foreground, direct Binder balance recognition passed twice in 6.4 and 4.8 seconds,
+returning -245.70 from the same synthetic image with the exact active model unchanged.
+The subsequent warm-engine Summer recognition/preview/persistence journey passed twice.
+The earlier 6 GB device's failures remain valid; cold background stability and complex
+image accuracy are not established by these successful basic-image checks.
