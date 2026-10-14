@@ -126,3 +126,10 @@ returning -245.70 from the same synthetic image with the exact active model unch
 The subsequent warm-engine Summer recognition/preview/persistence journey passed twice.
 The earlier 6 GB device's failures remain valid; cold background stability and complex
 image accuracy are not established by these successful basic-image checks.
+
+Guided response-format probes on the same foreground E4B subsequently passed twice:
+image `text`, image `json_object`, image `json_schema` with Summer's complete balance
+schema, and text-only `json_schema` requesting integer value 7. All eight live assertions
+passed (25.9 and 25.6 seconds per four-case suite). Both guided image modes preserved
+the actual -245.70 balance and the active model stayed unchanged. This demonstrates
+basic guided output for this device/model, not accuracy across arbitrary images/models.
