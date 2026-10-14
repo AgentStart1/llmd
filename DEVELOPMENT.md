@@ -58,3 +58,21 @@ Appium import, explicit E4B selection, and service readiness passed in import-on
 The runner force-launches its variant, waits for atomic replacement to complete even when
 the old ID remains visible, and preserves timeout causes while polling readiness.
 Binder contract/text checks were exercised separately; image generation remains unpassed.
+
+## Large-heap experiment, 2026-10-14
+
+On the same 6 GB Android 15 device, the runtime reports a 256 MB ordinary managed-heap
+limit and a 512 MB large-heap limit. An experimental Debug APK set `android:largeHeap`
+and PackageManager confirmed `LARGE_HEAP` on the installed app. Model, precision,
+backend configuration, dependencies, and context limits were unchanged.
+
+E4B initialized in 16.8 seconds; process PSS was about 3.63 GB while the Dalvik heap
+was about 4 MB. The synthetic 900×600 balance image reached native visual preprocessing
+(2340 patches). The low-memory killer then terminated LLMD to reclaim 3,769,700 KB RSS.
+No recognition result was produced. The waiting Summer test was stopped after the
+process-death evidence was captured and is not counted as a pass.
+
+The ordinary-heap baseline also exited after its WebView renderer was killed, so this
+run does not establish a paired image-latency comparison. The enabled run independently
+establishes that large heap does not prevent the observed E4B image memory failure.
+The experimental flag was removed and the ordinary-heap Debug APK restored.
