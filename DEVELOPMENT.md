@@ -96,3 +96,12 @@ ZRAM's observed peak physical allocation was about 175 MiB.
 Rooted debugging was restored to disabled. ZRAM remains enabled for the current boot
 only, without persistent system changes. This configuration did not make E4B image
 inference fit the device's memory budget; no fallback model was selected.
+
+The follow-up test increased ZRAM to 6 GiB, retaining LZO and swappiness 100. E4B
+initialized in 16.6 seconds, and the identical image again reached 2340-patch native
+preprocessing. The low-memory killer terminated LLMD at 3,996,928 KB RSS with
+99,840 KB process swap; exit history again reported `LOW_MEMORY`. A system swap
+sample held approximately 529 MiB, far below the configured capacity. No recognition
+result was produced and the waiting test was stopped. Increasing swap capacity alone
+did not prevent the failure. Rooted debugging was disabled again; 6 GiB ZRAM remains
+enabled only for the current boot. No model, precision, backend, or fallback changed.
