@@ -5,9 +5,7 @@ use crossterm::{
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use llmd_core::{
-    ChatMessage, ChatRequest, ModelProvider, DEFAULT_HOST, DEFAULT_MODEL, DEFAULT_PORT,
-};
+use llmd_core::{ChatMessage, ChatRequest, ModelProvider, DEFAULT_HOST, DEFAULT_PORT};
 use llmd_rlitert::LiteRtProvider;
 use ratatui::{
     backend::CrosstermBackend,
@@ -40,7 +38,7 @@ enum Commands {
     Models,
     Chat {
         prompt: String,
-        #[arg(short, long, default_value = DEFAULT_MODEL)]
+        #[arg(short, long)]
         model: String,
     },
     Tui,
@@ -151,7 +149,7 @@ fn run_tui() -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::{parse_cli_from, Commands};
-    use llmd_core::{DEFAULT_HOST, DEFAULT_MODEL, DEFAULT_PORT};
+    use llmd_core::{DEFAULT_HOST, DEFAULT_PORT};
 
     #[test]
     fn parses_serve_defaults() {
@@ -200,16 +198,25 @@ mod tests {
     }
 
     #[test]
-    fn parses_chat_defaults() {
-        let cli = parse_cli_from(["llmd", "chat", "hello"]).unwrap();
+    fn parses_explicit_chat_model() {
+        let cli = parse_cli_from(["llmd", "chat", "hello", "--model", "imported-model"]).unwrap();
 
         match cli.command {
             Commands::Chat { prompt, model } => {
                 assert_eq!(prompt, "hello");
-                assert_eq!(model, DEFAULT_MODEL);
+                assert_eq!(model, "imported-model");
             }
             _ => panic!("expected chat command"),
         }
+    }
+
+    #[test]
+    fn chat_requires_an_explicit_model() {
+        let error = parse_cli_from(["llmd", "chat", "hello"]).unwrap_err();
+        assert_eq!(
+            error.kind(),
+            clap::error::ErrorKind::MissingRequiredArgument
+        );
     }
 
     #[test]

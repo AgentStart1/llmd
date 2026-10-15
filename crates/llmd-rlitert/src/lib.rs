@@ -83,7 +83,7 @@ impl LiteRtProvider {
         })
     }
 
-    /// Import a local .litertlm file, or download the built-in default model.
+    /// Import a local .litertlm file, or explicitly download the supported Gemma alias.
     pub async fn import_model(&self, model: &str) -> Result<(), LlmdError> {
         let source = PathBuf::from(model);
         let local = source.is_file();
@@ -111,7 +111,7 @@ impl LiteRtProvider {
                 .await
                 .map_err(backend)?;
         } else {
-            if id != llmd_core::DEFAULT_MODEL {
+            if id != "gemma-4-E2B-it" {
                 return Err(backend(
                     "Unknown download alias; import a local .litertlm file instead",
                 ));
@@ -245,7 +245,7 @@ mod tests {
         ] {
             assert!(validate_model_id(id).is_err(), "{id}");
         }
-        assert!(validate_model_id(llmd_core::DEFAULT_MODEL).is_ok());
+        assert!(validate_model_id("gemma-4-E2B-it").is_ok());
     }
 
     #[test]

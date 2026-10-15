@@ -42,10 +42,8 @@ class LlmdIpcService : Service() {
     override fun onBind(intent: Intent?): IBinder = binder
 
     override fun onDestroy() {
-        serviceScope.launch {
-            LlmdAndroidBridge.close()
-            serviceScope.cancel()
-        }
+        // The explicit foreground service owns the engine; IPC connections only own requests.
+        serviceScope.cancel()
         super.onDestroy()
     }
 
@@ -53,7 +51,6 @@ class LlmdIpcService : Service() {
         val callingUid = Binder.getCallingUid()
         serviceScope.launch {
             val response = if (LlmdIpcAuthorization.isAuthorized(this@LlmdIpcService, callingUid)) {
-                LlmdAndroidBridge.initialize(this@LlmdIpcService)
                 buildResponse()
             } else {
                 authorizationRequiredResponse()
@@ -64,14 +61,7 @@ class LlmdIpcService : Service() {
 
     private suspend fun buildHealthResponse(): String =
         withContext(Dispatchers.Default) {
-            val bridgeHealth = JSONObject(LlmdAndroidBridge.healthJson())
-            JSONObject()
-                .put("status", "ok")
-                .put("provider", PROVIDER)
-                .put("engineReady", bridgeHealth.getBoolean("engineReady"))
-                .put("engineState", bridgeHealth.getString("engineState"))
-                .put("engineError", bridgeHealth.opt("engineError"))
-                .toString()
+            LlmdAndroidBridge.healthJson()
         }
 
     private suspend fun buildListModelsResponse(): String =
@@ -99,7 +89,7 @@ class LlmdIpcService : Service() {
         withContext(Dispatchers.Default) {
             runCatching {
                 val request = JSONObject(requestJson)
-                val model = request.optString("model", DEFAULT_MODEL)
+                val model = request.getString("model")
                 val content = LlmdAndroidBridge.chatCompletion(requestJson, callingUid)
                 JSONObject()
                     .put("id", "chatcmpl-android-ipc")
@@ -163,13 +153,12 @@ class LlmdIpcService : Service() {
             .put(
                 "error",
                 JSONObject()
-                    .put("message", "Request cancelled because the model changed")
-                    .put("type", "model_changed"),
+                    .put("message", "Request cancelled or model service stopped")
+                    .put("type", "request_cancelled"),
             )
             .toString()
 
     private companion object {
-        const val DEFAULT_MODEL = "gemma-4-E2B-it"
         const val PROVIDER = "litert-lm-android"
     }
 }

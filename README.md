@@ -8,11 +8,9 @@
 - Terminal: Rust CLI/TUI, using the same native bindings.
 - Android: Tauri mobile UI with native LiteRT-LM Android inference. Android uses the official Kotlin SDK rather than the desktop C API binding.
 
-Default model:
-
-```text
-gemma-4-E2B-it
-```
+There is no default model or model fallback. Model lists contain only locally imported,
+nonempty `.litertlm` files. Requests must name an exact model ID (the filename without its
+extension); missing or unknown IDs fail instead of selecting another model.
 
 ## Workspace
 
@@ -42,7 +40,7 @@ cargo run -p llmd -- models
 Run one prompt:
 
 ```bash
-cargo run -p llmd -- chat "Hello"
+cargo run -p llmd -- chat --model <imported-model-id> "Hello"
 ```
 
 Open the terminal UI shell:
@@ -86,7 +84,7 @@ npm run tauri dev
 ```
 
 The desktop app has Status, Models, and Logs pages. On Models, enter a local `.litertlm`
-file path to import it, or `gemma-4-E2B-it` to download the default model (`HF_TOKEN` is
+file path to import it, or explicitly enter `gemma-4-E2B-it` to download that model (`HF_TOKEN` is
 supported). Files are stored under the OS local data directory in `llmd/models`.
 Set `LLMD_MODEL_DIR` to use another directory, including an existing directory of models.
 Old rlitert-lm downloads are not moved or deleted automatically; import them by file path.
@@ -106,28 +104,43 @@ Android uses the shared Tauri UI in `app`. The device app should expose the same
 
 Use the Models page to choose a local model file to import. Selecting an imported
 model opens its details page, where the file can be deleted from app-private storage.
+Importing, opening the app, checking health, and binding IPC do not load a model. On Status,
+choose an imported model and turn on **Keep model service on**. Wait for **Ready** before
+calling it. The foreground service keeps that exact model loaded across client disconnects;
+switching off cancels requests and releases it. Stop the service before changing models or
+model files. Process termination returns it to Off; it does not silently restart a model.
 
-Prepare the default Gemma 4 E2B model:
+On Android 13+, allow the notification prompt when switching the service on so its
+ongoing status and stop action are visible. Status shows whether notifications are
+allowed. If your device restricts background apps, open **System background settings**
+and allow LLMD to run in the background. Depending on the manufacturer, also open
+the LLMD card's menu in Recent apps and choose **Lock app** or the equivalent protection
+option. These system settings are separate from the model-service switch.
+
+Download an explicitly chosen model, for example the full vision-capable Gemma 4 E4B file:
 
 ```bash
-scripts/download-gemma-model.sh
+GEMMA_REPO_ID=litert-community/gemma-4-E4B-it-litert-lm \
+GEMMA_MODEL_FILE=gemma-4-E4B-it.litertlm scripts/download-gemma-model.sh
 ```
 
 Push the model to a connected Android device for a debuggable APK:
 
 ```bash
+GEMMA_MODEL_PATH=/path/to/chosen-model.litertlm \
 ANDROID_UDID=<device-serial> scripts/prepare-android-model.sh
 ```
 
-The default model path is `models/gemma/gemma-4-E2B-it.litertlm`. Model files are ignored by git.
-The Android preparation script copies that file into the app-private `files/models` directory. Its default target is the
+Model files are ignored by git. The Android preparation script requires `GEMMA_MODEL_PATH`
+and preserves that file's name in the app-private `files/models` directory. Its target is the
 debug package, `com.storytellerf.llmd.debug`; set `ANDROID_PACKAGE` when preparing another debuggable variant.
 
 Run the Android end-to-end test through Appium. By default this builds and installs the normal
 `debug` APK as `com.storytellerf.llmd.debug`, pushes the model to device Downloads, imports it through the Android document picker,
-then verifies that the native Android bridge reports the imported model:
+then selects that model, switches the service on, and checks it through Binder IPC:
 
 ```bash
+GEMMA_MODEL_PATH=/path/to/chosen-model.litertlm \
 ANDROID_UDID=<device-serial> scripts/test-android-appium.sh
 ```
 
@@ -135,6 +148,7 @@ When investigating obfuscation issues, use the `e2e` buildType. It keeps release
 enabled while remaining debug-signed for local installation:
 
 ```bash
+GEMMA_MODEL_PATH=/path/to/chosen-model.litertlm \
 ANDROID_UDID=<device-serial> scripts/test-android-appium.sh --e2e
 ```
 
@@ -142,6 +156,9 @@ Android exposes LiteRT-LM to other Android apps only through its authorized Bind
 it does not listen on a device TCP port. See `docs/android-tauri-ipc-api.md`.
 
 ## Tests
+
+See [DEVELOPMENT.md](DEVELOPMENT.md) for lifecycle ownership, generated Android packaging,
+verification commands, and physical-device limits.
 
 Run the core workspace tests:
 

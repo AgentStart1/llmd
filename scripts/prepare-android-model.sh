@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-MODEL_PATH="${GEMMA_MODEL_PATH:-${ROOT_DIR}/models/gemma/gemma-4-E2B-it.litertlm}"
-REMOTE_MODEL_PATH="${REMOTE_GEMMA_MODEL_PATH:-/data/local/tmp/llmd/gemma-4-E2B-it.litertlm}"
+MODEL_PATH="${GEMMA_MODEL_PATH:?Set GEMMA_MODEL_PATH to the model file to prepare}"
+MODEL_FILE="$(basename "${MODEL_PATH}")"
+REMOTE_MODEL_PATH="${REMOTE_GEMMA_MODEL_PATH:-/data/local/tmp/llmd/${MODEL_FILE}}"
 ANDROID_PACKAGE="${ANDROID_PACKAGE:-com.storytellerf.llmd.debug}"
-APP_MODEL_PATH="${APP_GEMMA_MODEL_PATH:-files/models/gemma-4-E2B-it.litertlm}"
+APP_MODEL_PATH="${APP_GEMMA_MODEL_PATH:-files/models/${MODEL_FILE}}"
 DEVICE_SERIAL="${ANDROID_UDID:-${ANDROID_SERIAL:-}}"
 
 if [[ ! -s "${MODEL_PATH}" ]]; then
   echo "Gemma model is missing: ${MODEL_PATH}" >&2
-  echo "Run scripts/download-gemma-model.sh or copy it from ../dush/models/gemma first." >&2
+  echo "Download the chosen model first, then set GEMMA_MODEL_PATH to its file." >&2
   exit 1
 fi
 

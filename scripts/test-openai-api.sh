@@ -2,7 +2,7 @@
 set -euo pipefail
 
 BASE_URL="${LLMD_OPENAI_BASE_URL:-http://127.0.0.1:11435}"
-MODEL="${LLMD_TEST_MODEL:-gemma-4-E2B-it}"
+MODEL="${LLMD_TEST_MODEL:?Set LLMD_TEST_MODEL to an imported model ID}"
 PROMPT="${LLMD_TEST_PROMPT:-Reply with one short sentence.}"
 
 need() {

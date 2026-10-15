@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO_ID="${GEMMA_REPO_ID:-litert-community/gemma-4-E2B-it-litert-lm}"
-MODEL_FILE="${GEMMA_MODEL_FILE:-gemma-4-E2B-it.litertlm}"
+REPO_ID="${GEMMA_REPO_ID:?Set GEMMA_REPO_ID to the model repository}"
+MODEL_FILE="${GEMMA_MODEL_FILE:?Set GEMMA_MODEL_FILE to the exact .litertlm filename}"
 OUTPUT_DIR="${GEMMA_MODEL_DIR:-models/gemma}"
 OUTPUT_PATH="${OUTPUT_DIR}/${MODEL_FILE}"
 URL="https://huggingface.co/${REPO_ID}/resolve/main/${MODEL_FILE}"
