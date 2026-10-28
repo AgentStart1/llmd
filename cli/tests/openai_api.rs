@@ -18,7 +18,6 @@ impl Endpoint {
         );
         Self {
             client: Client::builder()
-                .no_proxy()
                 .connect_timeout(Duration::from_secs(5))
                 .timeout(Duration::from_secs(180))
                 .build()
@@ -108,4 +107,48 @@ fn real_model_generates_the_exact_requested_json_object() {
         serde_json::from_str(body["choices"][0]["message"]["content"].as_str().unwrap()).unwrap();
     // Exact equality checks the object type, required key, string enum and absence of extra keys.
     assert_eq!(content, json!({"value": "ok"}));
+}
+
+#[tokio::test]
+async fn external_endpoint_tests_honor_environment_proxies() {
+    use std::process::Stdio;
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+
+    let proxy = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let proxy_url = format!("http://{}", proxy.local_addr().unwrap());
+    // A fresh process avoids changing environment variables underneath other tests
+    // and exercises the same client construction as the opt-in endpoint checks.
+    let child = tokio::process::Command::new(std::env::current_exe().unwrap())
+        .args(["--ignored", "--exact", "real_model_endpoint_is_healthy"])
+        .env("LLMD_TEST_MODEL", "proxy-fixture")
+        .env("LLMD_OPENAI_BASE_URL", "http://llmd-proxy-test.invalid")
+        .env("HTTP_PROXY", &proxy_url)
+        .env("http_proxy", &proxy_url)
+        .env("HTTPS_PROXY", &proxy_url)
+        .env("https_proxy", &proxy_url)
+        .env("ALL_PROXY", &proxy_url)
+        .env("all_proxy", &proxy_url)
+        .env("NO_PROXY", "")
+        .env("no_proxy", "")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(15), async {
+        let (stream, _) = proxy.accept().await.unwrap();
+        let mut stream = BufReader::new(stream);
+        let mut request = String::new();
+        stream.read_line(&mut request).await.unwrap();
+        assert_eq!(request, "GET http://llmd-proxy-test.invalid/health HTTP/1.1\r\n");
+        loop {
+            let mut header = String::new();
+            stream.read_line(&mut header).await.unwrap();
+            if header == "\r\n" || header.is_empty() { break; }
+        }
+        stream.get_mut().write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 15\r\nConnection: close\r\n\r\n{\"status\":\"ok\"}").await.unwrap();
+        let output = child.wait_with_output().await.unwrap();
+        assert!(output.status.success(), "{} {}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+    }).await.expect("endpoint test did not complete through the environment proxy");
 }
