@@ -1,6 +1,7 @@
 # Development
 
-The Tauri app requires Rust 1.90 or newer. After updating the Tauri CLI and Rust crates,
+The workspace requires Rust 1.88 or newer for Ratatui 0.30; the Tauri app requires
+Rust 1.90 or newer. After updating the Tauri CLI and Rust crates,
 regenerate Android with `npm --prefix app run tauri -- android init --ci`, then run
 `scripts/sync-tauri-android-overrides.sh`. Tauri 2.12 generates Gradle 9.6.1 / AGP 9.3.1
 projects targeting Android API 37; install that SDK platform before Android checks.
@@ -12,6 +13,10 @@ Dependabot checks GitHub Actions, npm in `app`, both Cargo projects, and the And
 and IPC sample Gradle dependencies weekly. Version updates are grouped by ecosystem,
 including major, minor, and patch releases. Generated Android toolchain versions remain owned
 by the Tauri template; the Kotlin override is maintained under `app/src-tauri/android/patches`.
+Fantoccini action types in the Android E2E runner must match the version exposed
+by `appium-client`. Version 0.2.2 requires Fantoccini 0.19; Dependabot ignores
+Fantoccini 0.20 and newer until the Appium client supports those public types.
+Update this compatibility constraint and its Dependabot exception together.
 
 Android sources belong in `app/src-tauri/android`. The generated Tauri checkout is ignored;
 apply canonical activity overrides with `scripts/sync-tauri-android-overrides.sh` after
@@ -89,11 +94,24 @@ Lint run still reports generated TV manifest issues `MissingTvBanner` and
 ## CLI and OpenAI API integration tests
 
 `cargo test --workspace --locked` runs the actual CLI binary integration tests in
-`cli/tests/cli.rs`. Each case owns an empty temporary model directory and its child
-process. Server cases bind loopback port zero and discover the assigned port from
-the startup log. Commands and server readiness have a 30-second limit; HTTP calls
-have connection and request timeouts. Children are killed and reaped on normal
-completion or panic before their temporary files are removed.
+`cli/tests/cli.rs`. Each case uses a supervisor that creates and exclusively owns
+its CLI process, empty model directory, and logs. The runner holds a loopback
+control connection and receives typed startup, CLI-exit, and cleanup-completion
+events. A successful test scope must receive successful cleanup confirmation and
+verify the supervisor's exit status. Command and readiness waits are bounded to
+30 seconds; HTTP calls also have connection and request timeouts. Server cases
+bind loopback port zero and discover the assigned port from the startup log.
+
+Normal scope completion half-closes the connection, leaving the runner able to
+receive the cleanup result. A panic or runner termination closes the connection,
+triggering the same cleanup ownership: stop/reap the CLI, then delete its files.
+`Drop` provides fallback cleanup; it cannot turn a failed cleanup into a passing
+scope. Supervisors use a separate terminal process group so Ctrl-C does not
+interrupt cleanup. Forcibly terminating a supervisor can prevent cleanup, but a
+surviving runner detects the missing completion event and fails. Regressions cover
+runner cancellation, supervisor termination, and Windows file-removal failure.
+Two ignored internal entry points run supervision and cancellation fixtures;
+they are not real-model checks.
 Run only these cases with `cargo test -p llmd --locked --test cli`, or use the thin
 `scripts/test-cli.sh` compatibility entry point. No curl, jq, or Python is required.
 
@@ -103,7 +121,7 @@ endpoint and import a model first, then explicitly run:
 
 ```bash
 LLMD_TEST_MODEL=<imported-model-id> LLMD_OPENAI_BASE_URL=http://127.0.0.1:11435 \
-  cargo test -p llmd --locked --test openai_api -- --ignored --test-threads=1
+  cargo test -p llmd --locked --test openai_api -- --ignored
 ```
 
 PowerShell users can set `$env:LLMD_TEST_MODEL` and `$env:LLMD_OPENAI_BASE_URL`
@@ -112,8 +130,16 @@ compatibility launcher; explicitly enabling these tests without a nonempty model
 ID fails rather than reporting a pass. Separate cases check health, inventory,
 nonempty non-streaming text, and strict JSON generation of exactly `{"value":"ok"}`
 (including the string enum and no extra properties). `LLMD_TEST_PROMPT` optionally
-sets the ordinary text prompt. Each request has a 180-second timeout. These checks
-do not cover streaming, tools, multimodal requests, or Android Binder IPC, and do
-not start or stop the externally managed endpoint. Run with one test thread on
-resource-constrained model servers. Android Appium and desktop installer tests
-retain their existing platform integration entry points.
+sets the ordinary text prompt. External endpoint tests honor environment proxy
+settings, including `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY`; only isolated
+loopback CLI fixture requests disable proxies. A model-free regression exercises
+this behavior through a local fake proxy in a fresh subprocess. Each request has
+a 180-second timeout. The Rust fixture serializes generation requests within the
+test executable, acquiring its permit before starting each HTTP request so local
+queue time does not consume that timeout. This applies to direct Cargo runs and
+Shell launchers alike, while keeping separate generation cases. A model-free
+concurrency regression checks the number of requests in flight at an HTTP fixture.
+The permit does not coordinate other test processes or external callers.
+These checks do not cover streaming, tools, multimodal requests, or Android Binder
+IPC, and do not start or stop the externally managed endpoint. Android Appium and
+desktop installer tests retain their existing platform integration entry points.

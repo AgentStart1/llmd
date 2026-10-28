@@ -164,7 +164,7 @@ pub fn create_router(provider: Arc<dyn ModelProvider>) -> Router {
     Router::new()
         .route("/health", get(health))
         .route("/v1/models", get(list_models))
-        .route("/v1/models/:model", get(get_model))
+        .route("/v1/models/{model}", get(get_model))
         .route("/v1/chat/completions", post(chat_completions))
         .layer(TraceLayer::new_for_http())
         .layer(cors)
@@ -469,6 +469,24 @@ mod tests {
         assert_eq!(body["object"], "list");
         assert_eq!(body["data"][0]["id"], "fake-model");
         assert_eq!(body["data"][0]["owned_by"], "llmd-test");
+    }
+
+    #[tokio::test]
+    async fn model_lookup_captures_the_requested_id() {
+        let response = app()
+            .oneshot(
+                Request::builder()
+                    .uri("/v1/models/fake-model")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body: serde_json::Value = serde_json::from_str(&body_text(response).await).unwrap();
+        assert_eq!(body["object"], "model");
+        assert_eq!(body["id"], "fake-model");
+        assert_eq!(body["owned_by"], "llmd-test");
     }
 
     #[tokio::test]
