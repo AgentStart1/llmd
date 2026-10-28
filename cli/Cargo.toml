@@ -22,6 +22,8 @@ tracing-subscriber.workspace = true
 litertlm-sys = "=0.16.3"
 
 [dev-dependencies]
+axum.workspace = true
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json"] }
 serde_json.workspace = true
+serde.workspace = true
 tempfile = "3"

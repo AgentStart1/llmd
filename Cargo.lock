@@ -1351,6 +1351,7 @@ name = "llmd"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "axum",
  "clap",
  "crossterm",
  "litertlm-sys",
@@ -1359,6 +1360,7 @@ dependencies = [
  "llmd-server",
  "ratatui",
  "reqwest 0.12.28",
+ "serde",
  "serde_json",
  "tempfile",
  "tokio",
