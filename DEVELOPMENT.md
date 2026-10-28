@@ -1,6 +1,7 @@
 # Development
 
-The Tauri app requires Rust 1.90 or newer. After updating the Tauri CLI and Rust crates,
+The workspace requires Rust 1.88 or newer for Ratatui 0.30; the Tauri app requires
+Rust 1.90 or newer. After updating the Tauri CLI and Rust crates,
 regenerate Android with `npm --prefix app run tauri -- android init --ci`, then run
 `scripts/sync-tauri-android-overrides.sh`. Tauri 2.12 generates Gradle 9.6.1 / AGP 9.3.1
 projects targeting Android API 37; install that SDK platform before Android checks.
@@ -12,6 +13,10 @@ Dependabot checks GitHub Actions, npm in `app`, both Cargo projects, and the And
 and IPC sample Gradle dependencies weekly. Version updates are grouped by ecosystem,
 including major, minor, and patch releases. Generated Android toolchain versions remain owned
 by the Tauri template; the Kotlin override is maintained under `app/src-tauri/android/patches`.
+Fantoccini action types in the Android E2E runner must match the version exposed
+by `appium-client`. Version 0.2.2 requires Fantoccini 0.19; Dependabot ignores
+Fantoccini 0.20 and newer until the Appium client supports those public types.
+Update this compatibility constraint and its Dependabot exception together.
 
 Android sources belong in `app/src-tauri/android`. The generated Tauri checkout is ignored;
 apply canonical activity overrides with `scripts/sync-tauri-android-overrides.sh` after

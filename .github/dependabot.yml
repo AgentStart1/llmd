@@ -15,6 +15,10 @@ updates:
       - "/app/src-tauri"
     schedule:
       interval: weekly
+    ignore:
+      # Remove when appium-client supports newer Fantoccini action types.
+      - dependency-name: fantoccini
+        versions: [">=0.20"]
     groups:
       cargo-dependencies:
         patterns:

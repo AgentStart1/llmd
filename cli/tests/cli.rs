@@ -76,6 +76,20 @@ fn serve_exposes_an_empty_http_model_list() {
 }
 
 #[test]
+fn serve_reports_the_unknown_model_id_over_http() {
+    with_server(|_, base| {
+        let response = client()
+            .get(format!("{base}/v1/models/missing"))
+            .send()
+            .unwrap();
+        assert_eq!(response.status(), 404);
+        let body: Value = response.json().unwrap();
+        assert_eq!(body["error"]["message"], "model not found: missing");
+    })
+    .unwrap();
+}
+
+#[test]
 fn abnormal_supervisor_exit_cannot_pass_the_test_scope() {
     let mut directory = None;
     let error = with_cli(&["models"], |session| {
