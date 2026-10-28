@@ -20,3 +20,8 @@ tracing-subscriber.workspace = true
 
 [target.'cfg(not(target_os = "android"))'.dependencies]
 litertlm-sys = "=0.16.3"
+
+[dev-dependencies]
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json"] }
+serde_json.workspace = true
+tempfile = "3"

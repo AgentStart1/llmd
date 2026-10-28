@@ -9,7 +9,8 @@ Keep the debug package suffix in `bundle.android.debugApplicationIdSuffix` so th
 preserves it when rewriting generated Gradle files.
 Keep `app/package-lock.json` and `app/pnpm-lock.yaml` synchronized when updating npm dependencies.
 Dependabot checks GitHub Actions, npm in `app`, both Cargo projects, and the Android library
-and IPC sample Gradle dependencies weekly. Generated Android toolchain versions remain owned
+and IPC sample Gradle dependencies weekly. Version updates are grouped by ecosystem,
+including major, minor, and patch releases. Generated Android toolchain versions remain owned
 by the Tauri template; the Kotlin override is maintained under `app/src-tauri/android/patches`.
 
 Android sources belong in `app/src-tauri/android`. The generated Tauri checkout is ignored;
@@ -84,3 +85,35 @@ Project host/Android static checks, Tauri packaging/tests, Android lifecycle/inv
 unit tests, and Summer build/unit/Lint checks passed. The optional full LLMD Android
 Lint run still reports generated TV manifest issues `MissingTvBanner` and
 `ImpliedTouchscreenHardware`; no new Lint errors were found in the changed code.
+
+## CLI and OpenAI API integration tests
+
+`cargo test --workspace --locked` runs the actual CLI binary integration tests in
+`cli/tests/cli.rs`. Each case owns an empty temporary model directory and its child
+process. Server cases bind loopback port zero and discover the assigned port from
+the startup log. Commands and server readiness have a 30-second limit; HTTP calls
+have connection and request timeouts. Children are killed and reaped on normal
+completion or panic before their temporary files are removed.
+Run only these cases with `cargo test -p llmd --locked --test cli`, or use the thin
+`scripts/test-cli.sh` compatibility entry point. No curl, jq, or Python is required.
+
+Real-model checks in `cli/tests/openai_api.rs` are ignored by default, so ordinary
+CI reports them as ignored and never downloads or calls a model. Start a host
+endpoint and import a model first, then explicitly run:
+
+```bash
+LLMD_TEST_MODEL=<imported-model-id> LLMD_OPENAI_BASE_URL=http://127.0.0.1:11435 \
+  cargo test -p llmd --locked --test openai_api -- --ignored --test-threads=1
+```
+
+PowerShell users can set `$env:LLMD_TEST_MODEL` and `$env:LLMD_OPENAI_BASE_URL`
+before running the same Cargo command. `scripts/test-openai-api.sh` is a thin
+compatibility launcher; explicitly enabling these tests without a nonempty model
+ID fails rather than reporting a pass. Separate cases check health, inventory,
+nonempty non-streaming text, and strict JSON generation of exactly `{"value":"ok"}`
+(including the string enum and no extra properties). `LLMD_TEST_PROMPT` optionally
+sets the ordinary text prompt. Each request has a 180-second timeout. These checks
+do not cover streaming, tools, multimodal requests, or Android Binder IPC, and do
+not start or stop the externally managed endpoint. Run with one test thread on
+resource-constrained model servers. Android Appium and desktop installer tests
+retain their existing platform integration entry points.

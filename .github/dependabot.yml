@@ -5,9 +5,9 @@ updates:
     schedule:
       interval: weekly
     groups:
-      tauri:
+      npm-dependencies:
         patterns:
-          - "@tauri-apps/*"
+          - "*"
 
   - package-ecosystem: cargo
     directories:
@@ -16,9 +16,9 @@ updates:
     schedule:
       interval: weekly
     groups:
-      tauri:
+      cargo-dependencies:
         patterns:
-          - "tauri*"
+          - "*"
 
   - package-ecosystem: github-actions
     directory: "/"
