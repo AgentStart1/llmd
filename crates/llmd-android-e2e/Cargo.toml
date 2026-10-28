@@ -9,6 +9,6 @@ rust-version.workspace = true
 [dependencies]
 anyhow.workspace = true
 appium-client = { version = "0.2.2", default-features = false, features = ["rustls-tls"] }
-fantoccini = "0.19.3"
+fantoccini = "0.22.1"
 serde_json.workspace = true
 tokio.workspace = true

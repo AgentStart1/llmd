@@ -19,7 +19,7 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 
 [target.'cfg(not(target_os = "android"))'.dependencies]
-litertlm-sys = "=0.16.3"
+litertlm-sys = "=0.16.4"
 
 [dev-dependencies]
 axum.workspace = true

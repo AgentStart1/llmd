@@ -23,7 +23,7 @@ tauri = { version = "2.12.5", features = [] }
 tokio = { version = "1.42", features = ["full"] }
 
 [target.'cfg(not(target_os = "android"))'.dependencies]
-litertlm-sys = "=0.16.3"
+litertlm-sys = "=0.16.4"
 
 [features]
 custom-protocol = ["tauri/custom-protocol"]
