@@ -1,5 +1,25 @@
 version: 2
 updates:
+  - package-ecosystem: npm
+    directory: "/app"
+    schedule:
+      interval: weekly
+    groups:
+      tauri:
+        patterns:
+          - "@tauri-apps/*"
+
+  - package-ecosystem: cargo
+    directories:
+      - "/"
+      - "/app/src-tauri"
+    schedule:
+      interval: weekly
+    groups:
+      tauri:
+        patterns:
+          - "tauri*"
+
   - package-ecosystem: github-actions
     directory: "/"
     schedule:
@@ -10,7 +30,9 @@ updates:
           - "*"
 
   - package-ecosystem: gradle
-    directory: "/app/src-tauri/android/llmd-android"
+    directories:
+      - "/app/src-tauri/android/llmd-android"
+      - "/app/src-tauri/android/llmd-sample"
     schedule:
       interval: weekly
     groups:
