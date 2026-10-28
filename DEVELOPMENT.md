@@ -92,8 +92,15 @@ Lint run still reports generated TV manifest issues `MissingTvBanner` and
 `cli/tests/cli.rs`. Each case owns an empty temporary model directory and its child
 process. Server cases bind loopback port zero and discover the assigned port from
 the startup log. Commands and server readiness have a 30-second limit; HTTP calls
-have connection and request timeouts. Children are killed and reaped on normal
-completion or panic before their temporary files are removed.
+have connection and request timeouts. A supervisor process owns the CLI child and
+its temporary directory. The runner keeps a stdin pipe open as a lease; closing
+that pipe on completion, panic, or runner termination makes the supervisor kill
+and reap the CLI before removing its files. The supervisor is separated from the
+runner's terminal process group so Ctrl-C does not interrupt cleanup. Forcibly
+terminating the supervisor itself can still prevent temporary-file cleanup.
+Two ignored internal fixture entry points implement supervision and cancellation
+validation; they are not real-model checks. The ordinary suite kills a nested
+runner and verifies that its endpoint stops and its temporary directory disappears.
 Run only these cases with `cargo test -p llmd --locked --test cli`, or use the thin
 `scripts/test-cli.sh` compatibility entry point. No curl, jq, or Python is required.
 
@@ -112,8 +119,11 @@ compatibility launcher; explicitly enabling these tests without a nonempty model
 ID fails rather than reporting a pass. Separate cases check health, inventory,
 nonempty non-streaming text, and strict JSON generation of exactly `{"value":"ok"}`
 (including the string enum and no extra properties). `LLMD_TEST_PROMPT` optionally
-sets the ordinary text prompt. Each request has a 180-second timeout. These checks
-do not cover streaming, tools, multimodal requests, or Android Binder IPC, and do
+sets the ordinary text prompt. External endpoint tests honor environment proxy
+settings, including `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY`; only isolated
+loopback CLI fixture requests disable proxies. A model-free regression exercises
+this behavior through a local fake proxy in a fresh subprocess. Each request has
+a 180-second timeout. These checks do not cover streaming, tools, multimodal requests, or Android Binder IPC, and do
 not start or stop the externally managed endpoint. Run with one test thread on
 resource-constrained model servers. Android Appium and desktop installer tests
 retain their existing platform integration entry points.
