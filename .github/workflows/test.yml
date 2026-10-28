@@ -2,6 +2,7 @@ name: Test
 
 on:
   workflow_dispatch:
+  # Seed the same cache scopes that pull requests restore from their base branch.
   push:
     branches: ["main"]
     paths:
