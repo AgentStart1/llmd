@@ -1,5 +1,17 @@
 # Development
 
+The Tauri app requires Rust 1.90 or newer. After updating the Tauri CLI and Rust crates,
+regenerate Android with `npm --prefix app run tauri -- android init --ci`, then run
+`scripts/sync-tauri-android-overrides.sh`. Tauri 2.12 generates Gradle 9.6.1 / AGP 9.3.1
+projects targeting Android API 37; install that SDK platform before Android checks.
+The maintained Android library and IPC sample compile Java and Kotlin to JVM 17.
+Keep the debug package suffix in `bundle.android.debugApplicationIdSuffix` so the CLI
+preserves it when rewriting generated Gradle files.
+Keep `app/package-lock.json` and `app/pnpm-lock.yaml` synchronized when updating npm dependencies.
+Dependabot checks GitHub Actions, npm in `app`, both Cargo projects, and the Android library
+and IPC sample Gradle dependencies weekly. Generated Android toolchain versions remain owned
+by the Tauri template; the Kotlin override is maintained under `app/src-tauri/android/patches`.
+
 Android sources belong in `app/src-tauri/android`. The generated Tauri checkout is ignored;
 apply canonical activity overrides with `scripts/sync-tauri-android-overrides.sh` after
 Tauri builds before packaging a variant, because regeneration can reset its application ID.

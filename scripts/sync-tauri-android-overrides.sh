@@ -56,6 +56,11 @@ need_file "${MANIFEST_FILE}"
 need_file "${PROGUARD_FILE}"
 need_file "${MAIN_ACTIVITY_OVERRIDE}"
 
+# Tauri writes CRLF on Windows; patch anchors use LF on every host.
+for generated_file in "${BUILD_FILE}" "${SETTINGS_FILE}" "${ROOT_BUILD_FILE}" "${MANIFEST_FILE}" "${PROGUARD_FILE}"; do
+  perl -pi -e 's/\r$//' "${generated_file}"
+done
+
 if [[ ! -d "${ANDROID_LIBRARY_DIR}" ]]; then
   echo "Missing Android library: ${ANDROID_LIBRARY_DIR}" >&2
   exit 1
@@ -84,7 +89,7 @@ if ! grep -Fq 'applicationId = "com.storytellerf.llmd"' "${BUILD_FILE}"; then
   apply_patch_script "${BUILD_FILE}" "${PATCHES_DIR}/transformations/application-id.perl"
 fi
 
-if ! grep -Fq 'applicationIdSuffix = ".debug"' "${BUILD_FILE}"; then
+if ! grep -Fq 'applicationIdSuffix = ".debug"' "${BUILD_FILE}" || ! grep -Fq 'versionNameSuffix = "-debug"' "${BUILD_FILE}"; then
   apply_patch_script "${BUILD_FILE}" "${PATCHES_DIR}/insertion-points/debug-build-type.perl"
 fi
 
