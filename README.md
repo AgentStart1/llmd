@@ -160,23 +160,8 @@ it does not listen on a device TCP port. See `docs/android-tauri-ipc-api.md`.
 See [DEVELOPMENT.md](DEVELOPMENT.md) for lifecycle ownership, generated Android packaging,
 verification commands, and physical-device limits.
 
-Run the core workspace tests:
-
-```bash
-cargo test --workspace
-```
-
-Run the Tauri desktop tests:
-
-```bash
-cargo test --manifest-path app/src-tauri/Cargo.toml
-```
-
-Run OpenAI-compatible API tests against any running endpoint:
-
-```bash
-LLMD_OPENAI_BASE_URL=http://127.0.0.1:11435 scripts/test-openai-api.sh
-```
+See [Development](DEVELOPMENT.md#cli-and-openai-api-integration-tests) for workspace,
+CLI, and opt-in real-model API verification.
 
 Run the real LiteRT-LM smoke test manually when the runtime and model are installed:
 

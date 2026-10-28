@@ -183,7 +183,8 @@ pub async fn serve_with_shutdown(
 ) -> anyhow::Result<()> {
     let app = create_router(provider);
     let listener = tokio::net::TcpListener::bind(format!("{host}:{port}")).await?;
-    tracing::info!("llmd listening on http://{host}:{port}");
+    let address = listener.local_addr()?;
+    tracing::info!("llmd listening on http://{address}");
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown)
         .await?;
