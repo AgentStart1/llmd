@@ -57,6 +57,16 @@ LLMD in Recent apps. These system choices are separate from the service switch.
 
 ## Verification
 
+The Test workflow runs on pull requests, relevant pushes to main, and manual dispatches.
+Main runs seed Rust dependency caches that subsequent pull requests can restore. Linux
+host checks cache both the root workspace's `target` and `app/src-tauri/target`; Windows
+packaging caches only the latter. Android debug validation and release packaging cache
+`app/src-tauri/target` under separate keys. Their target artifacts use different profiles
+and are not interchangeable; each cache also contains Cargo registry/git downloads.
+Keep cache keys separated by platform and build purpose. The Rust cache action retains
+dependencies rather than workspace outputs or incremental compilation state. Compare
+cold and warm runs, including cache restore/save time and size, before claiming savings.
+
 Live Binder checks covered exact model inventory, missing/blank/unknown IDs, valid IDs
 while Off, mismatched IDs while Ready, and disconnect/rebind without loading or replacing
 a model. Explicit E4B text and synthetic balance-image generation passed, including
