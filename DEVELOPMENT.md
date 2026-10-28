@@ -21,12 +21,13 @@ inventory tests. They cover explicit selection, readiness, cancelled loading, re
 release, failed initialization without fallback, and exact inventory resolution.
 
 For a connected device, acquire the device-side test lock before installation or testing.
+Device locking is managed externally by the caller or AI plugin; the test entry point
+runs directly without requiring an agent plugin installation.
 Set `GEMMA_MODEL_PATH` explicitly when running `scripts/test-android-appium.sh`.
 `LLMD_ANDROID_E2E_SKIP_BUILD=1` uses already installed app/sample APKs;
 `LLMD_ANDROID_E2E_IMPORT_ONLY=1` checks import, explicit selection, and service readiness
 without claiming IPC generation coverage. Sessions force-launch the selected app so
 coinstalled variants cannot receive another variant's test actions.
-`LLMD_ANDROID_E2E_LOCK_HELD=1` is only for a caller that already owns the device lock.
 The runner installs in place without clearing app data or allowing version downgrades.
 
 ## Background operation
