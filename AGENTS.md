@@ -1,87 +1,83 @@
 # AGENTS.md
 
-## Static Checks
+## 静态检查
 
-Before handing off code changes, run the relevant static checks from the repository root:
+交付代码改动前，在仓库根目录运行相关静态检查：
 
 ```bash
 ./scripts/check-static.sh --host
 ```
 
-Use Android checks when touching Android, JNI, Tauri mobile generation, or Android workflows:
+涉及 Android、JNI、Tauri 移动端生成或 Android 工作流时，运行 Android 检查：
 
 ```bash
 ./scripts/check-static.sh --android
 ```
 
-If only the Android generated Gradle/Kotlin/AIDL side changed, this narrower check is acceptable:
+如果仅修改 Android 生成的 Gradle、Kotlin 或 AIDL 部分，可以使用范围更小的检查：
 
 ```bash
 ./scripts/check-static.sh --android-kotlin
 ```
 
-The frontend checks expect dependencies to be installed first:
+前端检查要求先安装依赖：
 
 ```bash
 npm --prefix app ci
 ```
 
-Run a patch hygiene check before handing off:
+交付前检查补丁格式：
 
 ```bash
 git diff --check
 ```
 
-Generated Android sources and resources under `app/src-tauri/gen/android` may be ignored by
-`.gitignore` even when they are intentionally part of a change. When adding new generated
-Android files, verify them with:
+即使改动有意包含 `app/src-tauri/gen/android` 下生成的 Android 源码和资源，它们仍可能被 `.gitignore` 忽略。添加这类文件时，使用以下命令核实：
 
 ```bash
 git status --short --untracked-files=all
 ```
 
-Use `git add -f <path>` only for specific generated files that are intentionally required by the
-change.
+只有确实需要纳入改动的具体生成文件，才使用 `git add -f <path>`。
 
-## Tests
+## 测试
 
-Run focused Rust tests for server/API behavior changes:
+服务器或 API 行为变化时，运行聚焦的 Rust 测试：
 
 ```bash
 cargo test -p llmd-server
 ```
 
-Run all workspace Rust tests when shared crates, CLI behavior, or cross-crate contracts change:
+共享 crate、CLI 行为或跨 crate 约定变化时，运行整个工作区的 Rust 测试：
 
 ```bash
 cargo test --workspace
 ```
 
-Run Tauri Rust tests when `app/src-tauri` behavior changes:
+`app/src-tauri` 行为变化时，运行 Tauri Rust 测试：
 
 ```bash
 cargo test --manifest-path app/src-tauri/Cargo.toml
 ```
 
-For OpenAI-compatible HTTP API changes, test against a running endpoint:
+OpenAI 兼容 HTTP API 变化时，针对运行中的端点测试：
 
 ```bash
 LLMD_TEST_MODEL=<imported-model-id> LLMD_OPENAI_BASE_URL=http://127.0.0.1:11435 cargo test -p llmd --locked --test openai_api -- --ignored
 ```
 
-For Android model-import validation, run the Appium flow against a connected device:
+验证 Android 模型导入时，针对已连接设备运行 Appium 流程：
 
 ```bash
 GEMMA_MODEL_PATH=/path/to/chosen-model.litertlm ANDROID_UDID=<device-serial> scripts/test-android-appium.sh
 ```
 
-For Android IPC authorization changes, manually verify on device or emulator:
+Android IPC 授权变化时，在设备或模拟器上手动验证：
 
-- an unauthorized caller receives an `authorization_required` IPC response,
-- the authorization Activity opens from `com.storytellerf.llmd.action.AUTHORIZE_CALLER`,
-- approving the caller persists authorization through DataStore,
-- the same caller can call health, model list, and chat IPC methods after approval,
-- no `SharedPreferences` or `runBlocking` usage is introduced in the IPC authorization path.
+- 未授权调用方收到 `authorization_required` IPC 响应；
+- 可通过 `com.storytellerf.llmd.action.AUTHORIZE_CALLER` 打开授权 Activity；
+- 批准调用方后，授权通过 DataStore 持久化；
+- 批准后，同一调用方可调用健康检查、模型列表和聊天 IPC 方法；
+- IPC 授权路径不引入 `SharedPreferences` 或 `runBlocking`。
 
-Android does not expose a device-local OpenAI HTTP server. Its UI uses the in-app native bridge,
-and other Android apps use the authorized Binder IPC service.
+Android 不提供设备本地的 OpenAI HTTP 服务器。UI 使用应用内原生桥接，其他 Android 应用通过获授权的 Binder IPC 服务访问。
