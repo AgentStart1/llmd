@@ -78,7 +78,7 @@ npm install
 npm run tauri dev
 ```
 
-桌面应用包含 Status、Models 和 Logs 页面。在 Models 输入本地 `.litertlm` 文件路径即可导入，也可明确输入 `gemma-4-E2B-it` 下载该模型（支持 `HF_TOKEN`）。文件保存在操作系统本地数据目录的 `llmd/models` 下。设置 `LLMD_MODEL_DIR` 可改用其他目录，包括已有模型目录。旧 rlitert-lm 下载文件不会自动移动或删除，可按文件路径导入。模型 ID 是去掉 `.litertlm` 的文件名；导入绝不覆盖已有模型。
+桌面应用包含 Status、Models 和 Logs 页面。管理界面默认跟随系统或 WebView 宿主的明暗主题，运行时切换和重新进入页面均会更新，无需重启。在 Models 输入本地 `.litertlm` 文件路径即可导入，也可明确输入 `gemma-4-E2B-it` 下载该模型（支持 `HF_TOKEN`）。文件保存在操作系统本地数据目录的 `llmd/models` 下。设置 `LLMD_MODEL_DIR` 可改用其他目录，包括已有模型目录。旧 rlitert-lm 下载文件不会自动移动或删除，可按文件路径导入。模型 ID 是去掉 `.litertlm` 的文件名；导入绝不覆盖已有模型。
 
 桌面构建需要 libclang；不在默认搜索路径时设置 `LIBCLANG_PATH`。固定版本的 `litertlm-rs`/`litertlm-sys` 0.16.3 会下载经过校验和验证的 LiteRT-LM 0.16.0 原生库，并复制到 Cargo 可执行文件旁。分发应用包时也须包含原生库；平台专用 Tauri 配置会为 Windows、Linux 和 Apple Silicon macOS 打包。Windows 要求 MSVC target；此绑定没有 Intel macOS 预构建包。Android 继续使用官方 Kotlin SDK。目前推理使用 CPU，`--pool-size` 限制并发请求数。
 

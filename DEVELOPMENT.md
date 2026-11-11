@@ -40,3 +40,20 @@ LLMD_TEST_MODEL=<imported-model-id> LLMD_OPENAI_BASE_URL=http://127.0.0.1:11435 
 ```
 
 PowerShell 用户可先设置 `$env:LLMD_TEST_MODEL` 和 `$env:LLMD_OPENAI_BASE_URL`，再执行同一 Cargo 命令。`scripts/test-openai-api.sh` 是轻量兼容启动器；显式启用这些测试却未提供非空模型 ID 时会失败，不会报告通过。独立用例检查健康状态、模型清单、非空的非流式文本，以及严格生成恰好为 `{"value":"ok"}` 的 JSON（包括字符串枚举且无额外属性）。`LLMD_TEST_PROMPT` 可选地设置普通文本提示词。外部端点测试遵循环境代理设置，包括 `HTTP_PROXY`、`HTTPS_PROXY` 和 `NO_PROXY`；只有隔离的回环 CLI 夹具请求禁用代理。无需模型的回归通过全新子进程中的本地模拟代理验证此行为。每个请求超时为 180 秒。Rust 夹具在测试可执行文件内部串行执行生成请求，在发起每个 HTTP 请求前取得许可，避免本地排队时间消耗该超时。这同时适用于直接 Cargo 运行和 Shell 启动器，并保留独立的生成用例。无需模型的并发回归检查 HTTP 夹具的在途请求数量。该许可不协调其他测试进程或外部调用方。这些检查不覆盖流式响应、工具、多模态请求或 Android Binder IPC，也不启动或停止外部管理的端点。Android Appium 和桌面安装器测试保留现有的平台集成入口。
+
+## 管理界面主题验证
+
+在仓库根目录运行：
+
+```bash
+npm --prefix app ci
+npm --prefix app run test:theme
+```
+
+主题测试需要 Node.js 22 或更新版本和本地 Chrome/Chromium，默认执行 `google-chrome`，可通过 `CHROME_BIN` 指定浏览器可执行文件。测试先构建生产资源，再通过私有 CDP 管道运行无头浏览器；回环 HTTP 服务、浏览器及临时配置目录由测试负责清理，不需要额外测试依赖。可选 `THEME_SCREENSHOT_DIR` 保存代表性页面截图。
+
+测试以合成桌面 API 和 Android 桥接数据渲染 Status（包含系统设置入口）、Models、模型详情和 Logs，在 1100px 与 390px 宽度检查浅色/深色首开、运行中双向媒体切换、页面重新进入、交互控件 hover/focus、导入错误和模型清单错误/空状态。对可见普通文字与有效背景合成后计算对比度，要求至少 4.5:1；禁用控件不纳入该阈值。主题颜色不做过渡插值，避免切换过程中的文字和背景失配。状态点等语义图形保留原来的含义，不做整体反色。
+
+独立的 Android Status 夹具分别覆盖未选模型时禁用、已选模型且 Off 时可用未勾选、Ready 时可用已勾选。可用开关通过键盘 Tab 获得真实焦点，在保留焦点时双向切换主题，检查选中状态、原生外观、有效背景、焦点轮廓及文字对比度；禁用态明确断言不可获得焦点，不以跳过代替覆盖。
+
+浏览器媒体模拟不代表原生宿主覆盖。发布前应在可用的桌面 Tauri 和 Android WebView 环境中分别验证真实系统浅色→深色→浅色切换，首次打开、前后台恢复及重新进入页面，并确认原生设置入口与系统控件表现。仓库没有独立 Settings 页面，相关入口位于 Android Status 页。
