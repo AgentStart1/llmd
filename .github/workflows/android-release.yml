@@ -4,12 +4,13 @@ permissions:
   contents: write
 
 on:
+  release:
+    types: [published]
   push:
     branches: ["main"]
-    tags:
-      - "*"
 
 env:
+  RELEASE_TAG: ${{ github.event.release.tag_name }}
   ANDROID_TARGET: "aarch64"
 
 jobs:
@@ -79,7 +80,7 @@ jobs:
         run: |
           npx tauri android init --ci
           ../scripts/sync-tauri-android-overrides.sh
-          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+          if [[ "$GITHUB_EVENT_NAME" == "release" ]]; then
             npx tauri android build --apk --target "${ANDROID_TARGET}" --ci
           else
             npx tauri android build --apk --target "${ANDROID_TARGET}" --ci
@@ -95,7 +96,7 @@ jobs:
           storyteller_f_sign_key_password: ${{ secrets.KEY_PASSWORD }}
 
       - name: Upload alpha Android APK
-        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        if: ${{ !(github.event_name == 'release') }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: llmd-android-alpha-apk
@@ -103,7 +104,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload release Android APK
-        if: startsWith(github.ref, 'refs/tags/')
+        if: (github.event_name == 'release')
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: llmd-android-release-apk
@@ -113,7 +114,7 @@ jobs:
   release:
     name: Upload release assets
     needs: build
-    if: startsWith(github.ref, 'refs/tags/')
+    if: (github.event_name == 'release')
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -127,13 +128,6 @@ jobs:
           name: llmd-android-release-apk
           path: release-assets
 
-      - name: Create release when missing
-        shell: bash
-        run: |
-          if ! gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes --title "$GITHUB_REF_NAME"
-          fi
-
       - name: Upload release assets
         shell: bash
         run: |
@@ -142,4 +136,4 @@ jobs:
             echo "No release assets found" >&2
             exit 1
           fi
-          gh release upload "$GITHUB_REF_NAME" "${assets[@]}" --clobber
+          gh release upload "$RELEASE_TAG" "${assets[@]}" --clobber
